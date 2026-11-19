@@ -1,0 +1,22 @@
+[package]
+name = "fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+domain_name_system = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "domain_name_system_reply"
+path = "fuzz_targets/domain_name_system_reply.rs"
+test = false
+doc = false
+bench = false
