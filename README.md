@@ -53,15 +53,18 @@ the reply that a truncated UDP reply asks for.
 
 ## What is proven
 
-Three Kani harnesses in `src/proofs.rs` prove three things:
+Four Kani harnesses in `src/proofs.rs` prove four things:
 
 - `the_name_decoder_is_total_and_in_bounds`: on any bytes and any start offset, the name decoder
   stays inside the message and terminates.
 - `the_header_round_trips_on_every_value`: a header written and parsed again is the header.
 - `tcp_reassembly_is_total_and_honest`: `TcpReply` is total on any split of its input and refuses a
   reply longer than it announced.
+- `the_dotted_parse_accepts_exactly_names`: `Name::from_dotted_bytes` never panics and accepts exactly
+  the texts that are names.
 
-Run them with `cargo kani`. The three take about a minute together on a laptop. Each harness has a
+Run them with `cargo kani`. The four take about five minutes together on a laptop, nearly all of it in the dotted parse; one harness takes
+a few seconds. Each harness has a
 falsification patch in `falsifications/` that applies a defect the harness is there to catch. Apply
 one and the harness must fail:
 
@@ -75,12 +78,14 @@ git checkout -- src
 
 ```sh
 cargo test
+rustup target add x86_64-unknown-none aarch64-unknown-none-softfloat riscv64imac-unknown-none-elf
 cargo build --lib --target x86_64-unknown-none   # also aarch64-unknown-none-softfloat, riscv64imac-unknown-none-elf
 ```
 
 The proofs need Kani, which `rustup` does not install. Run `cargo install --locked
 kani-verifier --version 0.68.0`, then `cargo kani setup`. The setup step downloads a model checker, so it needs
-network access. CI uses version 0.68.0, and another version may verify differently.
+network access and fetches a pinned nightly toolchain. A passing run still prints notes about unreachable code and dead objects under
+`Description:` headings; the line that matters is `VERIFICATION:- SUCCESSFUL`. CI uses version 0.68.0, and another version may verify differently.
 
 The tests in `tests/replies.rs` read three real replies captured from a recursive server. Their
 capture command is in `tests/fixtures/README.md`. The crate's own `fuzz/` directory holds a target
@@ -105,7 +110,8 @@ bytes and `Result<Answer, Reject>` is 300. A caller on a small stack should coun
 
 ## Minimum Rust version
 
-Rust 1.88, the floor that `as_chunks_mut` sets.
+Rust 1.88, the floor that `as_chunks_mut` sets. To check it, run `rustup toolchain install 1.88` and
+`cargo +1.88 build --lib`, which succeeds, and `cargo +1.87 build --lib` refuses with a message naming 1.88.
 
 ## License
 
