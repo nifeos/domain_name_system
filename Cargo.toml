@@ -1,6 +1,6 @@
 [package]
 name = "domain_name_system"
-version = "0.1.0"
+version = "0.1.0-pre.1"
 edition = "2024"
 rust-version = "1.88"
 description = "The DNS wire format a stub resolver needs: a query for one name's IPv4 addresses, the checks a reply must pass, and TCP framing"
