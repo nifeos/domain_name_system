@@ -4,4 +4,10 @@
 # refused too, so this list can only shrink by a diff that says why.
 
 # Mutation census row carried from the source tree, as counts: caught 200, missed 3, timeout 4, unviable 21.
-# The 3 missed mutant(s) are not listed here because the census did not record which; the first weekly mutation run names each, and each goes below as `<file>:<line> # <reason>`.
+
+src/lib.rs:279 # the mutant keeps the label end at its start, so the scan never advances and loops forever; any test that reaches it hangs
+src/lib.rs:332 # the equal-length case returns on the line above, so `<` and `<=` differ only where the lengths are equal, which is never reached
+src/lib.rs:337 # the mutants leave the offset at zero or step it by zero, so the walk never advances and loops forever; any test that reaches it hangs
+src/lib.rs:451 # the pointer's six high bits are shifted left eight and its low byte is eight bits, so the fields share no bit and `^` is `|`
+src/lib.rs:455 # the mutant accepts a pointer to the fence itself, which loops forever; any test that reaches it hangs
+src/lib.rs:586 # the high half is shifted left sixteen and the low half is sixteen bits, so the fields share no bit and `^` is `|`
