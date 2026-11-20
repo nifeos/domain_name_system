@@ -164,9 +164,9 @@ pub struct Header {
 }
 
 impl Header {
-    /// Decode the first 12 bytes of `msg`.
-    pub fn parse(msg: &[u8]) -> Result<Header> {
-        let b = msg.get(..HEADER_BYTES).ok_or(Error::Truncated)?;
+    /// Decode the first 12 bytes of `message`.
+    pub fn parse(message: &[u8]) -> Result<Header> {
+        let b = message.get(..HEADER_BYTES).ok_or(Error::Truncated)?;
         let f = |i: usize| u16::from_be_bytes([b[i], b[i + 1]]);
         Ok(Header {
             id: f(0),
@@ -408,7 +408,7 @@ impl core::fmt::Display for Name {
     }
 }
 
-/// Decode one possibly compressed name starting at `off` in the whole message `msg`.
+/// Decode one possibly compressed name starting at `off` in the whole message `message`.
 ///
 /// Returns the name and the offset just past it in the original stream (past the first pointer if
 /// there was one, else past the root label), which is where the caller keeps reading.
@@ -417,12 +417,12 @@ impl core::fmt::Display for Name {
 /// is what a correct encoder always produces, and it is the termination argument: the pointer
 /// budget strictly decreases and every label consumes bytes, so a pointer loop is an
 /// [`Error::PointerForward`] rather than a hang. `src/proofs.rs` checks that claim with Kani.
-pub fn decode_name(msg: &[u8], off: usize) -> Result<(Name, usize)> {
+pub fn decode_name(message: &[u8], off: usize) -> Result<(Name, usize)> {
     let mut out = Name {
         bytes: [0; MAXIMUM_NAME_BYTES],
         length_bytes: 0,
     };
-    let (len, resume) = decode_name_into(msg, off, &mut out.bytes)?;
+    let (len, resume) = decode_name_into(message, off, &mut out.bytes)?;
     // The engine wrote at most the array's 255 bytes, so the length fits its `u8`.
     out.length_bytes = len as u8;
     Ok((out, resume))
@@ -433,17 +433,21 @@ pub fn decode_name(msg: &[u8], off: usize) -> Result<(Name, usize)> {
 /// is separate so the Kani harness can prove the same loop against a small output, where the solver
 /// is fast (the proof at the full 255 bytes measured twenty-plus minutes). It is both proved with
 /// Kani and fuzzed.
-pub(crate) fn decode_name_into(msg: &[u8], off: usize, out: &mut [u8]) -> Result<(usize, usize)> {
+pub(crate) fn decode_name_into(
+    message: &[u8],
+    off: usize,
+    out: &mut [u8],
+) -> Result<(usize, usize)> {
     let mut len = 0usize;
     let mut position = off;
     let mut resume: Option<usize> = None;
     // Every pointer must target an offset strictly below this.
     let mut fence = off;
     loop {
-        let b = *msg.get(position).ok_or(Error::Truncated)?;
+        let b = *message.get(position).ok_or(Error::Truncated)?;
         match b & 0xc0 {
             0xc0 => {
-                let b2 = *msg.get(position + 1).ok_or(Error::Truncated)?;
+                let b2 = *message.get(position + 1).ok_or(Error::Truncated)?;
                 let target = ((b as usize & 0x3f) << 8) | b2 as usize;
                 if resume.is_none() {
                     resume = Some(position + 2);
@@ -463,7 +467,7 @@ pub(crate) fn decode_name_into(msg: &[u8], off: usize, out: &mut [u8]) -> Result
                     return Ok((len + 1, resume.unwrap_or(position + 1)));
                 }
                 let l = b as usize;
-                let label = msg
+                let label = message
                     .get(position + 1..position + 1 + l)
                     .ok_or(Error::Truncated)?;
                 let end = len + 1 + l;
@@ -529,28 +533,28 @@ pub struct Record<'a> {
 pub struct Reader<'a> {
     /// The message's header, decoded on construction.
     pub header: Header,
-    msg: &'a [u8],
+    message: &'a [u8],
     off: usize,
 }
 
 impl<'a> Reader<'a> {
-    /// Start reading `msg`, decoding its header.
-    pub fn new(msg: &'a [u8]) -> Result<Reader<'a>> {
+    /// Start reading `message`, decoding its header.
+    pub fn new(message: &'a [u8]) -> Result<Reader<'a>> {
         Ok(Reader {
-            header: Header::parse(msg)?,
-            msg,
+            header: Header::parse(message)?,
+            message,
             off: HEADER_BYTES,
         })
     }
 
     fn u16_at(&self, off: usize) -> Result<u16> {
-        let b = self.msg.get(off..off + 2).ok_or(Error::Truncated)?;
+        let b = self.message.get(off..off + 2).ok_or(Error::Truncated)?;
         Ok(u16::from_be_bytes([b[0], b[1]]))
     }
 
     /// Read the next question.
     pub fn question(&mut self) -> Result<Question> {
-        let (name, off) = decode_name(self.msg, self.off)?;
+        let (name, off) = decode_name(self.message, self.off)?;
         let record_type = self.u16_at(off)?;
         let class = self.u16_at(off + 2)?;
         self.off = off + 4;
@@ -563,7 +567,7 @@ impl<'a> Reader<'a> {
 
     /// Read the next resource record.
     pub fn record(&mut self) -> Result<Record<'a>> {
-        let (name, off) = decode_name(self.msg, self.off)?;
+        let (name, off) = decode_name(self.message, self.off)?;
         let record_type = self.u16_at(off)?;
         let class = self.u16_at(off + 2)?;
         let ttl_hi = self.u16_at(off + 4)? as u32;
@@ -571,7 +575,7 @@ impl<'a> Reader<'a> {
         let rdlen = self.u16_at(off + 8)? as usize;
         let data_offset = off + 10;
         let data = self
-            .msg
+            .message
             .get(data_offset..data_offset + rdlen)
             .ok_or(Error::Truncated)?;
         self.off = data_offset + rdlen;
@@ -590,8 +594,8 @@ impl<'a> Reader<'a> {
 /// inside the record's own data, though its pointers may reach back anywhere earlier.
 #[doc(alias = "canonical name")]
 #[doc(alias = "CNAME")]
-pub fn canonical_name_target(msg: &[u8], record: &Record<'_>) -> Result<Name> {
-    let (name, end) = decode_name(msg, record.data_offset)?;
+pub fn canonical_name_target(message: &[u8], record: &Record<'_>) -> Result<Name> {
+    let (name, end) = decode_name(message, record.data_offset)?;
     if end != record.data_offset + record.data.len() {
         return Err(Error::BadRecordData);
     }
@@ -905,33 +909,33 @@ fn response_code_reject(code: u8) -> Reject {
 /// let n = query.request_tcp(&mut out).unwrap();
 /// assert_eq!(u16::from_be_bytes([out[0], out[1]]) as usize, n - 2);
 ///
-/// let mut buf = [0u8; 600];
-/// let mut reply = TcpReply::new(&mut buf);
+/// let mut buffer = [0u8; 600];
+/// let mut reply = TcpReply::new(&mut buffer);
 /// assert_eq!(reply.feed(&[0, 3, 1]), Ok(false)); // a length, and one byte of three
 /// assert_eq!(reply.feed(&[2, 3]), Ok(true));
 /// assert_eq!(reply.message(), Some(&[1u8, 2, 3][..]));
 /// ```
 pub struct TcpReply<'a> {
-    buf: &'a mut [u8],
+    buffer: &'a mut [u8],
     have: usize,
 }
 
 impl<'a> TcpReply<'a> {
-    /// Collect into `buf`, which bounds the reply: one announcing more than `buf.len() - 2` bytes is
+    /// Collect into `buffer`, which bounds the reply: one announcing more than `buffer.len() - 2` bytes is
     /// refused when its length arrives, before any of its body is read.
     ///
     /// A buffer no larger than [`MAXIMUM_UDP_MESSAGE_BYTES`] cannot hold the TCP reply that a
     /// truncated UDP reply asks for, which defeats the retry. Size it for the largest reply the
     /// caller accepts, up to [`MAXIMUM_TCP_MESSAGE_BYTES`] + 2.
-    pub fn new(buf: &'a mut [u8]) -> TcpReply<'a> {
-        TcpReply { buf, have: 0 }
+    pub fn new(buffer: &'a mut [u8]) -> TcpReply<'a> {
+        TcpReply { buffer, have: 0 }
     }
 
     fn wanted(&self) -> Option<usize> {
         if self.have < 2 {
             return None;
         }
-        Some(2 + u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize)
+        Some(2 + u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize)
     }
 
     /// Take the next piece. `Ok(true)` once the message is whole.
@@ -939,20 +943,20 @@ impl<'a> TcpReply<'a> {
         while !bytes.is_empty() {
             let limit = match self.wanted() {
                 Some(w) if self.have == w => return Err(Error::Trailing),
-                Some(w) if w > self.buf.len() => return Err(Error::Overflow),
+                Some(w) if w > self.buffer.len() => return Err(Error::Overflow),
                 Some(w) => w,
-                None => 2.min(self.buf.len()),
+                None => 2.min(self.buffer.len()),
             };
             if self.have >= limit {
                 return Err(Error::Overflow);
             }
             let take = (limit - self.have).min(bytes.len());
-            self.buf[self.have..self.have + take].copy_from_slice(&bytes[..take]);
+            self.buffer[self.have..self.have + take].copy_from_slice(&bytes[..take]);
             self.have += take;
             bytes = &bytes[take..];
         }
         match self.wanted() {
-            Some(w) if w > self.buf.len() => Err(Error::Overflow),
+            Some(w) if w > self.buffer.len() => Err(Error::Overflow),
             Some(w) => Ok(self.have == w),
             None => Ok(false),
         }
@@ -961,7 +965,7 @@ impl<'a> TcpReply<'a> {
     /// The message, without its length, once [`TcpReply::feed`] has said it is whole.
     pub fn message(&self) -> Option<&[u8]> {
         match self.wanted() {
-            Some(w) if self.have == w => Some(&self.buf[2..w]),
+            Some(w) if self.have == w => Some(&self.buffer[2..w]),
             _ => None,
         }
     }

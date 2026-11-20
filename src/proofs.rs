@@ -11,9 +11,9 @@
 
 use super::*;
 
-/// Every compression behaviour the decoder has (a pointer, a chain of them, a pointer into a label,
+/// Every compression behavior the decoder has (a pointer, a chain of them, a pointer into a label,
 /// each malformed variant) is expressible in five bytes.
-const MSG: usize = 5;
+const MESSAGE: usize = 5;
 const OUT: usize = 32;
 
 /// Falsification: replayable `falsifications/proofs.the_name_decoder_is_total_and_in_bounds.patch`
@@ -23,18 +23,18 @@ const OUT: usize = 32;
 /// length lies inside the output.
 ///
 /// The unwind bound is the termination argument made concrete: each iteration consumes a label
-/// (advancing within at most `MSG` bytes) or follows a pointer (and the fence strictly decreases, so
-/// at most `MSG` follows). 32 covers that with room, and Kani fails loudly if it does not.
+/// (advancing within at most `MESSAGE` bytes) or follows a pointer (and the fence strictly decreases, so
+/// at most `MESSAGE` follows). 32 covers that with room, and Kani fails loudly if it does not.
 #[kani::proof]
 #[kani::unwind(32)]
 fn the_name_decoder_is_total_and_in_bounds() {
-    let msg: [u8; MSG] = kani::any();
+    let message: [u8; MESSAGE] = kani::any();
     let off: usize = kani::any();
-    kani::assume(off <= MSG);
+    kani::assume(off <= MESSAGE);
 
     let mut out = [0u8; OUT];
-    if let Ok((len, resume)) = decode_name_into(&msg, off, &mut out) {
-        assert!(resume <= MSG, "resume offset escaped the message");
+    if let Ok((len, resume)) = decode_name_into(&message, off, &mut out) {
+        assert!(resume <= MESSAGE, "resume offset escaped the message");
         assert!(resume > off, "the decoder consumed nothing");
         assert!(len > 0 && len <= OUT, "written length escaped the output");
     }
@@ -54,9 +54,9 @@ fn the_header_round_trips_on_every_value() {
         authority_count: kani::any(),
         additional_count: kani::any(),
     };
-    let mut buf = [0u8; HEADER_BYTES];
-    h.write(&mut buf).unwrap();
-    assert_eq!(Header::parse(&buf).unwrap(), h);
+    let mut buffer = [0u8; HEADER_BYTES];
+    h.write(&mut buffer).unwrap();
+    assert_eq!(Header::parse(&buffer).unwrap(), h);
 }
 
 /// Falsification: replayable `falsifications/proofs.tcp_reassembly_is_total_and_honest.patch`
@@ -77,8 +77,8 @@ fn tcp_reassembly_is_total_and_honest() {
     let split_b: usize = kani::any();
     kani::assume(split_a <= 4 && split_b <= 4);
 
-    let mut buf = [0u8; 6];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 6];
+    let mut reply = TcpReply::new(&mut buffer);
     let _ = reply.feed(&first[..split_a]);
     let whole = reply.feed(&second[..split_b]);
     if let Ok(true) = whole {

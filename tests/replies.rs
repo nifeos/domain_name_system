@@ -495,9 +495,9 @@ fn one_malformed_answer_refuses_the_whole_reply() {
 fn a_pointer_loop_in_an_answer_is_malformed_not_a_hang() {
     // The owner is a pointer to itself.
     let at = Reply::to(OURS).bytes.len() as u16;
-    let ptr = (0xc000 | at).to_be_bytes();
+    let pointer = (0xc000 | at).to_be_bytes();
     let r = Reply::to(OURS).record(
-        &ptr,
+        &pointer,
         record_type::IPV4_ADDRESS,
         CLASS_IN,
         60,
@@ -570,11 +570,11 @@ fn within_is_label_by_label() {
 #[test]
 fn the_name_decoder_resumes_after_the_first_pointer() {
     // "zone" at 0, then "a" + pointer to 0 at 6.
-    let msg = b"\x04zone\x00\x01a\xc0\x00";
-    let (name, resume) = decode_name(msg, 6).unwrap();
+    let message = b"\x04zone\x00\x01a\xc0\x00";
+    let (name, resume) = decode_name(message, 6).unwrap();
     assert_eq!(name, Name::from_dotted("a.zone").unwrap());
-    assert_eq!(resume, msg.len());
-    let (_, resume) = decode_name(msg, 0).unwrap();
+    assert_eq!(resume, message.len());
+    let (_, resume) = decode_name(message, 0).unwrap();
     assert_eq!(resume, 6);
 }
 
@@ -598,17 +598,17 @@ fn the_name_decoder_refuses_what_is_not_a_name() {
 #[test]
 fn a_name_longer_than_255_by_pointers_is_refused() {
     // Each 63-byte label points back at the one before; five of them decode past 255 bytes.
-    let mut msg = vec![0u8];
-    let mut prev = 0u16;
+    let mut message = vec![0u8];
+    let mut previous = 0u16;
     for _ in 0..5 {
-        let here = msg.len() as u16;
-        msg.push(63);
-        msg.extend([b'a'; 63]);
-        msg.extend((0xc000 | prev).to_be_bytes());
-        prev = here;
+        let here = message.len() as u16;
+        message.push(63);
+        message.extend([b'a'; 63]);
+        message.extend((0xc000 | previous).to_be_bytes());
+        previous = here;
     }
     assert_eq!(
-        decode_name(&msg, prev as usize).err(),
+        decode_name(&message, previous as usize).err(),
         Some(Error::NameTooLong)
     );
 }
@@ -665,8 +665,8 @@ fn a_tcp_reply_reassembles_a_byte_at_a_time() {
     let real = REAL_EXAMPLE.to_vec();
     let mut framed = (real.len() as u16).to_be_bytes().to_vec();
     framed.extend(&real);
-    let mut buf = [0u8; 600];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 600];
+    let mut reply = TcpReply::new(&mut buffer);
     for (i, b) in framed.iter().enumerate() {
         assert_eq!(reply.message(), None);
         assert_eq!(reply.feed(&[*b]), Ok(i == framed.len() - 1));
@@ -678,16 +678,16 @@ fn a_tcp_reply_reassembles_a_byte_at_a_time() {
 
 #[test]
 fn a_tcp_reply_refuses_more_than_it_holds_and_more_than_it_announced() {
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 7]), Err(Error::Overflow));
 
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 2, 9, 9, 9]), Err(Error::Trailing));
 
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 0]), Ok(true));
     assert_eq!(reply.message(), Some(&[][..]));
 
@@ -696,8 +696,8 @@ fn a_tcp_reply_refuses_more_than_it_holds_and_more_than_it_announced() {
     assert_eq!(reply.feed(&[0]), Ok(false));
     assert_eq!(reply.feed(&[0]), Err(Error::Overflow));
 
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 6, 1, 2, 3, 4, 5, 6]), Ok(true));
 }
 
@@ -705,8 +705,8 @@ fn a_tcp_reply_refuses_more_than_it_holds_and_more_than_it_announced() {
 /// the same piece as the prefix, before any of it is copied.
 #[test]
 fn an_oversized_tcp_reply_is_refused_when_its_body_comes_with_its_length() {
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     let mut piece = vec![0, 16];
     piece.extend(1..=10);
     assert_eq!(reply.feed(&piece), Err(Error::Overflow));
@@ -733,12 +733,12 @@ fn a_time_to_live_wider_than_sixteen_bits_reads_whole() {
 /// A compression pointer is fourteen bits, so a target past offset 255 uses the high six.
 #[test]
 fn a_pointer_past_offset_255_reaches_its_target() {
-    let mut msg = vec![0u8; 300];
-    msg.extend(wire("zone.test"));
-    let at = msg.len();
-    msg.extend((0xc000u16 | 300).to_be_bytes());
+    let mut message = vec![0u8; 300];
+    message.extend(wire("zone.test"));
+    let at = message.len();
+    message.extend((0xc000u16 | 300).to_be_bytes());
     assert_eq!(
-        decode_name(&msg, at).unwrap().0,
+        decode_name(&message, at).unwrap().0,
         Name::from_dotted("zone.test").unwrap()
     );
 }
@@ -747,12 +747,12 @@ fn a_pointer_past_offset_255_reaches_its_target() {
 /// as truncated, and only a label past the limit is too long.
 #[test]
 fn labels_that_fill_the_limit_exactly_are_not_too_long() {
-    let mut msg = Vec::new();
+    let mut message = Vec::new();
     for len in [63u8, 63, 63, 62] {
-        msg.push(len);
-        msg.extend(vec![b'a'; len as usize]);
+        message.push(len);
+        message.extend(vec![b'a'; len as usize]);
     }
-    assert_eq!(decode_name(&msg, 0).err(), Some(Error::Truncated));
+    assert_eq!(decode_name(&message, 0).err(), Some(Error::Truncated));
 }
 
 #[test]

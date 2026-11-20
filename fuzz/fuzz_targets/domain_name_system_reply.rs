@@ -130,8 +130,8 @@ fuzz_target!(|reply: &[u8]| {
         let mut framed = (reply.len() as u16).to_be_bytes().to_vec();
         framed.extend_from_slice(reply);
         for step in [1, 3, framed.len()] {
-            let mut buf = vec![0u8; framed.len()];
-            let mut tcp = TcpReply::new(&mut buf);
+            let mut buffer = vec![0u8; framed.len()];
+            let mut tcp = TcpReply::new(&mut buffer);
             let mut whole = false;
             for piece in framed.chunks(step) {
                 whole = tcp.feed(piece).expect("a well-framed reply was refused");
