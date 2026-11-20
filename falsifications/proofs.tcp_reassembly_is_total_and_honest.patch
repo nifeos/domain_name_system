@@ -17,7 +17,7 @@ diff --git a/src/lib.rs b/src/lib.rs
          while !bytes.is_empty() {
              let limit = match self.wanted() {
                  Some(w) if self.have == w => return Err(Error::Trailing),
--                Some(w) if w > self.buf.len() => return Err(Error::Overflow),
+-                Some(w) if w > self.buffer.len() => return Err(Error::Overflow),
                  Some(w) => w,
-                 None => 2.min(self.buf.len()),
+                 None => 2.min(self.buffer.len()),
              };

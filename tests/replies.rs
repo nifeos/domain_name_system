@@ -4,7 +4,7 @@
 //! takes as seeds) were captured on 2026-10-04 (UTC) from
 //! 1.1.1.1 with a short Python script sending exactly the query `Query::request` writes (`tests/fixtures/README.md` has it and the id each carries), so they carry what a recursive
 //! server really does: compression pointers into the question, a canonical name pointing into its own owner,
-//! TTLs that differ along a chain. The rest are built by hand below, one per check, because nobody
+//! time to live values that differ along a chain. The rest are built by hand below, one per check, because nobody
 //! captures a forgery.
 
 use domain_name_system::{
@@ -15,13 +15,13 @@ use domain_name_system::{
 /// `example.com` A, id 0x1111: two A records, owners compressed to the question.
 const REAL_EXAMPLE: &[u8] = include_bytes!("fixtures/example.com.dns");
 /// `www.github.com` A, id 0x2222: a canonical name to `github.com` (a pointer into the question's own name)
-/// with TTL 1952, then github.com's A with TTL 33.
+/// with `TTL` 1952, then github.com's A with `TTL` 33.
 const REAL_GITHUB: &[u8] = include_bytes!("fixtures/www.github.com.dns");
-/// `nosuch.invalid` A, id 0x3333: NXDOMAIN, no records.
+/// `nosuch.invalid` A, id 0x3333: `NXDOMAIN`, no records.
 const REAL_NXDOMAIN: &[u8] = include_bytes!("fixtures/nosuch.invalid.dns");
 
 #[test]
-fn a_real_reply_with_two_addresses_gives_both_in_order() {
+fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
     let query = Query::new(0x1111, "example.com").unwrap();
     let answer = query.accept(REAL_EXAMPLE).unwrap();
     assert_eq!(
@@ -132,13 +132,13 @@ impl Reply {
         self.set_header(|h| h.answer_count += 1)
     }
 
-    fn a(self, owner: &str, address: [u8; 4]) -> Reply {
+    fn a(self, owner: &str, ipv4_address: [u8; 4]) -> Reply {
         self.record(
             &wire(owner),
             record_type::IPV4_ADDRESS,
             CLASS_IN,
             60,
-            &address,
+            &ipv4_address,
         )
     }
 
@@ -242,7 +242,7 @@ fn response_codes_are_named_and_carried() {
 }
 
 #[test]
-fn an_address_for_another_name_is_never_taken() {
+fn an_ipv4_address_for_another_name_is_never_taken() {
     // The cache-poisoning shape: a reply about our name that also "helpfully" carries an address
     // for somebody else's. Only ours comes out, and a reply carrying only theirs gives nothing.
     let mixed = Reply::to(OURS)
@@ -254,7 +254,7 @@ fn an_address_for_another_name_is_never_taken() {
 }
 
 #[test]
-fn an_empty_answer_section_is_no_address() {
+fn an_empty_answer_section_is_no_ipv4_address() {
     assert_eq!(Reply::to(OURS).judged(), Err(Reject::NoIpv4Address));
 }
 
@@ -276,7 +276,7 @@ fn a_chain_is_followed_in_any_order_and_only_from_our_name() {
 }
 
 #[test]
-fn an_address_for_our_name_beside_its_canonical_name_is_not_taken() {
+fn an_ipv4_address_for_our_name_beside_its_canonical_name_is_not_taken() {
     // A name with a canonical name has no other data (RFC 1034 section 3.6.2), so the chain's end is what counts.
     let r = Reply::to(OURS)
         .a(OURS, [6, 6, 6, 6])
@@ -339,7 +339,7 @@ fn other_record_types_are_ignored() {
 }
 
 #[test]
-fn addresses_past_the_limit_are_dropped_and_the_rest_kept() {
+fn ipv4_addresses_past_the_limit_are_dropped_and_the_rest_kept() {
     let mut r = Reply::to(OURS);
     for i in 0..(MAXIMUM_IPV4_ADDRESSES as u8 + 2) {
         r = r.a(OURS, [10, 0, 2, i]);
@@ -352,13 +352,13 @@ fn addresses_past_the_limit_are_dropped_and_the_rest_kept() {
     );
 }
 
-/// RFC 2181 section 8: a TTL with its most significant bit set is read as zero. An answer is good
+/// `RFC 2181` section 8: a `TTL` with its most significant bit set is read as zero. An answer is good
 /// for the shortest of its records' lifetimes, so one such record on the chain or among the
 /// addresses makes the whole answer good for no time at all, rather than for about 136 years.
 #[test]
 fn a_time_to_live_with_the_high_bit_set_is_zero() {
     for high in [0x8000_0000u32, 0xffff_ffff] {
-        let address_only = Reply::to(OURS)
+        let ipv4_address_only = Reply::to(OURS)
             .record(
                 &wire(OURS),
                 record_type::IPV4_ADDRESS,
@@ -369,7 +369,7 @@ fn a_time_to_live_with_the_high_bit_set_is_zero() {
             .bytes;
         let answer = Query::new(OUR_ID, OURS)
             .unwrap()
-            .accept(&address_only)
+            .accept(&ipv4_address_only)
             .unwrap();
         assert_eq!(answer.ttl_seconds(), 0, "{high:#x} on the address");
 
@@ -411,7 +411,7 @@ fn a_time_to_live_with_the_high_bit_set_is_zero() {
 }
 
 #[test]
-fn the_time_to_live_is_the_smallest_on_the_chain_and_among_the_addresses() {
+fn the_time_to_live_is_the_smallest_on_the_chain_and_among_the_ipv4_addresses() {
     let r = Reply::to(OURS)
         .record(
             &wire(OURS),
@@ -495,9 +495,9 @@ fn one_malformed_answer_refuses_the_whole_reply() {
 fn a_pointer_loop_in_an_answer_is_malformed_not_a_hang() {
     // The owner is a pointer to itself.
     let at = Reply::to(OURS).bytes.len() as u16;
-    let ptr = (0xc000 | at).to_be_bytes();
+    let pointer = (0xc000 | at).to_be_bytes();
     let r = Reply::to(OURS).record(
-        &ptr,
+        &pointer,
         record_type::IPV4_ADDRESS,
         CLASS_IN,
         60,
@@ -570,11 +570,11 @@ fn within_is_label_by_label() {
 #[test]
 fn the_name_decoder_resumes_after_the_first_pointer() {
     // "zone" at 0, then "a" + pointer to 0 at 6.
-    let msg = b"\x04zone\x00\x01a\xc0\x00";
-    let (name, resume) = decode_name(msg, 6).unwrap();
+    let message = b"\x04zone\x00\x01a\xc0\x00";
+    let (name, resume) = decode_name(message, 6).unwrap();
     assert_eq!(name, Name::from_dotted("a.zone").unwrap());
-    assert_eq!(resume, msg.len());
-    let (_, resume) = decode_name(msg, 0).unwrap();
+    assert_eq!(resume, message.len());
+    let (_, resume) = decode_name(message, 0).unwrap();
     assert_eq!(resume, 6);
 }
 
@@ -598,17 +598,17 @@ fn the_name_decoder_refuses_what_is_not_a_name() {
 #[test]
 fn a_name_longer_than_255_by_pointers_is_refused() {
     // Each 63-byte label points back at the one before; five of them decode past 255 bytes.
-    let mut msg = vec![0u8];
-    let mut prev = 0u16;
+    let mut message = vec![0u8];
+    let mut previous = 0u16;
     for _ in 0..5 {
-        let here = msg.len() as u16;
-        msg.push(63);
-        msg.extend([b'a'; 63]);
-        msg.extend((0xc000 | prev).to_be_bytes());
-        prev = here;
+        let here = message.len() as u16;
+        message.push(63);
+        message.extend([b'a'; 63]);
+        message.extend((0xc000 | previous).to_be_bytes());
+        previous = here;
     }
     assert_eq!(
-        decode_name(&msg, prev as usize).err(),
+        decode_name(&message, previous as usize).err(),
         Some(Error::NameTooLong)
     );
 }
@@ -665,8 +665,8 @@ fn a_tcp_reply_reassembles_a_byte_at_a_time() {
     let real = REAL_EXAMPLE.to_vec();
     let mut framed = (real.len() as u16).to_be_bytes().to_vec();
     framed.extend(&real);
-    let mut buf = [0u8; 600];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 600];
+    let mut reply = TcpReply::new(&mut buffer);
     for (i, b) in framed.iter().enumerate() {
         assert_eq!(reply.message(), None);
         assert_eq!(reply.feed(&[*b]), Ok(i == framed.len() - 1));
@@ -678,16 +678,16 @@ fn a_tcp_reply_reassembles_a_byte_at_a_time() {
 
 #[test]
 fn a_tcp_reply_refuses_more_than_it_holds_and_more_than_it_announced() {
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 7]), Err(Error::Overflow));
 
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 2, 9, 9, 9]), Err(Error::Trailing));
 
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 0]), Ok(true));
     assert_eq!(reply.message(), Some(&[][..]));
 
@@ -696,8 +696,8 @@ fn a_tcp_reply_refuses_more_than_it_holds_and_more_than_it_announced() {
     assert_eq!(reply.feed(&[0]), Ok(false));
     assert_eq!(reply.feed(&[0]), Err(Error::Overflow));
 
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     assert_eq!(reply.feed(&[0, 6, 1, 2, 3, 4, 5, 6]), Ok(true));
 }
 
@@ -705,14 +705,14 @@ fn a_tcp_reply_refuses_more_than_it_holds_and_more_than_it_announced() {
 /// the same piece as the prefix, before any of it is copied.
 #[test]
 fn an_oversized_tcp_reply_is_refused_when_its_body_comes_with_its_length() {
-    let mut buf = [0u8; 8];
-    let mut reply = TcpReply::new(&mut buf);
+    let mut buffer = [0u8; 8];
+    let mut reply = TcpReply::new(&mut buffer);
     let mut piece = vec![0, 16];
     piece.extend(1..=10);
     assert_eq!(reply.feed(&piece), Err(Error::Overflow));
 }
 
-/// A record's TTL is two 16-bit halves on the wire, high half first; one past 65,535 seconds
+/// A record's `TTL` is two 16-bit halves on the wire, high half first; one past 65,535 seconds
 /// needs both.
 #[test]
 fn a_time_to_live_wider_than_sixteen_bits_reads_whole() {
@@ -733,12 +733,12 @@ fn a_time_to_live_wider_than_sixteen_bits_reads_whole() {
 /// A compression pointer is fourteen bits, so a target past offset 255 uses the high six.
 #[test]
 fn a_pointer_past_offset_255_reaches_its_target() {
-    let mut msg = vec![0u8; 300];
-    msg.extend(wire("zone.test"));
-    let at = msg.len();
-    msg.extend((0xc000u16 | 300).to_be_bytes());
+    let mut message = vec![0u8; 300];
+    message.extend(wire("zone.test"));
+    let at = message.len();
+    message.extend((0xc000u16 | 300).to_be_bytes());
     assert_eq!(
-        decode_name(&msg, at).unwrap().0,
+        decode_name(&message, at).unwrap().0,
         Name::from_dotted("zone.test").unwrap()
     );
 }
@@ -747,12 +747,12 @@ fn a_pointer_past_offset_255_reaches_its_target() {
 /// as truncated, and only a label past the limit is too long.
 #[test]
 fn labels_that_fill_the_limit_exactly_are_not_too_long() {
-    let mut msg = Vec::new();
+    let mut message = Vec::new();
     for len in [63u8, 63, 63, 62] {
-        msg.push(len);
-        msg.extend(vec![b'a'; len as usize]);
+        message.push(len);
+        message.extend(vec![b'a'; len as usize]);
     }
-    assert_eq!(decode_name(&msg, 0).err(), Some(Error::Truncated));
+    assert_eq!(decode_name(&message, 0).err(), Some(Error::Truncated));
 }
 
 #[test]

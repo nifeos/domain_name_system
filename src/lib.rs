@@ -1,5 +1,4 @@
-//! **The Domain Name System (DNS) wire format a stub resolver needs** (Request for Comments (RFC)
-//! 1035; RFC 7766 for the Transmission Control Protocol, TCP), as pure
+//! **The Domain Name System (DNS) wire format a stub resolver needs** (`RFC 1035`; `RFC 7766` for the Transmission Control Protocol, TCP), as pure
 //! computation: the bytes of a query for one name's Internet Protocol version 4 (IPv4) addresses, and the checks a reply must pass
 //! before any address in it is believed. No socket, timer or policy; which program sends these
 //! bytes, and which names a client may ask about, are the caller's policy.
@@ -14,7 +13,7 @@
 //! # BUGS
 //!
 //! - IPv4 only: a query asks for address records alone, so it reads no address longer than four bytes.
-//! - No Extension Mechanisms for DNS (EDNS) version 0, so UDP (the User Datagram Protocol) replies stop at [`MAXIMUM_UDP_MESSAGE_BYTES`] and a larger answer costs a TCP
+//! - No Extension Mechanisms for DNS (`EDNS`) version 0, so UDP (the User Datagram Protocol) replies stop at [`MAXIMUM_UDP_MESSAGE_BYTES`] and a larger answer costs a TCP
 //!   retry.
 //! - No DNS Security Extensions (DNSSEC): an on-path attacker can forge the reply, id and all. No "0x20" case randomization.
 //! - At most [`MAXIMUM_IPV4_ADDRESSES`] addresses are kept from one answer; the rest are dropped.
@@ -33,14 +32,14 @@
 #[cfg(kani)]
 mod proofs;
 
-/// The port a name server listens on, over UDP and TCP alike (RFC 1035 section 4.2).
+/// The port a name server listens on, over UDP and TCP alike (`RFC 1035` section 4.2).
 pub const PORT: u16 = 53;
 
-/// The largest message RFC 1035 lets travel over the User Datagram Protocol (UDP) without EDNS
+/// The largest message `RFC 1035` lets travel over the User Datagram Protocol (UDP) without `EDNS`
 /// (section 4.2.1). A reply that would be larger arrives truncated, with [`FLAG_TRUNCATED`] set.
 pub const MAXIMUM_UDP_MESSAGE_BYTES: usize = 512;
 
-/// The largest message RFC 7766 lets travel over TCP: its two-byte length prefix counts up to
+/// The largest message `RFC 7766` lets travel over TCP: its two-byte length prefix counts up to
 /// 65,535 bytes, and the prefix itself comes on top.
 pub const MAXIMUM_TCP_MESSAGE_BYTES: usize = 65_535;
 
@@ -69,7 +68,7 @@ pub const FLAG_RECURSION_DESIRED: u16 = 0x0100;
 #[doc(alias = "RCODE")]
 pub const RESPONSE_CODE_MASK: u16 = 0x000f;
 
-/// The response code a server sends for a name that does not exist (RFC 1035's "Name Error").
+/// The response code a server sends for a name that does not exist (`RFC 1035`'s "Name Error").
 #[doc(alias = "RCODE")]
 #[doc(alias = "NXDOMAIN")]
 pub const RESPONSE_CODE_NAME_ERROR: u8 = 3;
@@ -92,7 +91,7 @@ pub mod record_type {
 pub const CLASS_IN: u16 = 1;
 
 /// How many canonical name links [`Query::accept`] follows before giving up. Real chains are one or two
-/// links (a CDN alias, sometimes a second); eight leaves room for that and stops a reply that chains
+/// links (a content delivery network (CDN) alias, sometimes a second); eight leaves room for that and stops a reply that chains
 /// a name through itself from costing more than eight scans of its own answer section.
 pub const MAXIMUM_CHAIN: usize = 8;
 
@@ -105,7 +104,7 @@ pub const MAXIMUM_IPV4_ADDRESSES: usize = 8;
 /// errors are a caller's mistake (a buffer too small, a name that cannot be one) and are reported
 /// rather than panicking, because a resolver must not be crashable by its own client's input.
 ///
-/// Non-exhaustive: Longer addresses or EDNS(0) would add variants, so a caller matches with a
+/// Non-exhaustive: Longer addresses or `EDNS` version 0 would add variants, so a caller matches with a
 /// wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -147,7 +146,8 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub struct Header {
     /// The transaction id a reply must echo.
     pub id: u16,
-    /// QR, the opcode, AA, TC, RD, RA and the response code, packed.
+    /// The Query/Response (QR) bit, the opcode, AA, `TC`, recursion desired (RD), recursion
+    /// available (RA) and the response code, packed.
     pub flags: u16,
     /// How many questions follow.
     #[doc(alias = "QDCOUNT")]
@@ -164,9 +164,9 @@ pub struct Header {
 }
 
 impl Header {
-    /// Decode the first 12 bytes of `msg`.
-    pub fn parse(msg: &[u8]) -> Result<Header> {
-        let b = msg.get(..HEADER_BYTES).ok_or(Error::Truncated)?;
+    /// Decode the first 12 bytes of `message`.
+    pub fn parse(message: &[u8]) -> Result<Header> {
+        let b = message.get(..HEADER_BYTES).ok_or(Error::Truncated)?;
         let f = |i: usize| u16::from_be_bytes([b[i], b[i + 1]]);
         Ok(Header {
             id: f(0),
@@ -209,7 +209,7 @@ impl Header {
 /// A name in uncompressed wire form (length-prefixed labels, ending in the empty root label), in a
 /// fixed buffer. 255 bytes is the protocol's own maximum, so this type holds every valid name.
 ///
-/// **Equality is DNS equality**: ASCII letters compare without regard to case (RFC 4343), because a
+/// **Equality is DNS equality**: ASCII letters compare without regard to case (`RFC 4343`), because a
 /// server may answer `Packages.Example.Test` to a question about `packages.example.test` and mean the
 /// same name. `Debug` and `Display` print the dotted form, and [`FromStr`](core::str::FromStr)
 /// reads it ([`Name::from_dotted`]).
@@ -241,7 +241,7 @@ impl Name {
     /// Each label is 1 to 63 bytes of ASCII letters, digits, `-` and `_` (see the crate's BUGS), and
     /// the whole is at most 255 bytes in wire form. `""` and `"."` are the root.
     ///
-    /// This is the DNS label alphabet the crate chose, not RFC 1123 host-name syntax: `-a.test`,
+    /// This is the DNS label alphabet the crate chose, not `RFC 1123` host-name syntax: `-a.test`,
     /// `a-.test` and `_acme-challenge.test` all pass. A caller that wants host-name rules checks
     /// them itself.
     ///
@@ -408,7 +408,7 @@ impl core::fmt::Display for Name {
     }
 }
 
-/// Decode one possibly compressed name starting at `off` in the whole message `msg`.
+/// Decode one possibly compressed name starting at `off` in the whole message `message`.
 ///
 /// Returns the name and the offset just past it in the original stream (past the first pointer if
 /// there was one, else past the root label), which is where the caller keeps reading.
@@ -417,12 +417,12 @@ impl core::fmt::Display for Name {
 /// is what a correct encoder always produces, and it is the termination argument: the pointer
 /// budget strictly decreases and every label consumes bytes, so a pointer loop is an
 /// [`Error::PointerForward`] rather than a hang. `src/proofs.rs` checks that claim with Kani.
-pub fn decode_name(msg: &[u8], off: usize) -> Result<(Name, usize)> {
+pub fn decode_name(message: &[u8], off: usize) -> Result<(Name, usize)> {
     let mut out = Name {
         bytes: [0; MAXIMUM_NAME_BYTES],
         length_bytes: 0,
     };
-    let (len, resume) = decode_name_into(msg, off, &mut out.bytes)?;
+    let (len, resume) = decode_name_into(message, off, &mut out.bytes)?;
     // The engine wrote at most the array's 255 bytes, so the length fits its `u8`.
     out.length_bytes = len as u8;
     Ok((out, resume))
@@ -433,17 +433,21 @@ pub fn decode_name(msg: &[u8], off: usize) -> Result<(Name, usize)> {
 /// is separate so the Kani harness can prove the same loop against a small output, where the solver
 /// is fast (the proof at the full 255 bytes measured twenty-plus minutes). It is both proved with
 /// Kani and fuzzed.
-pub(crate) fn decode_name_into(msg: &[u8], off: usize, out: &mut [u8]) -> Result<(usize, usize)> {
+pub(crate) fn decode_name_into(
+    message: &[u8],
+    off: usize,
+    out: &mut [u8],
+) -> Result<(usize, usize)> {
     let mut len = 0usize;
     let mut position = off;
     let mut resume: Option<usize> = None;
     // Every pointer must target an offset strictly below this.
     let mut fence = off;
     loop {
-        let b = *msg.get(position).ok_or(Error::Truncated)?;
+        let b = *message.get(position).ok_or(Error::Truncated)?;
         match b & 0xc0 {
             0xc0 => {
-                let b2 = *msg.get(position + 1).ok_or(Error::Truncated)?;
+                let b2 = *message.get(position + 1).ok_or(Error::Truncated)?;
                 let target = ((b as usize & 0x3f) << 8) | b2 as usize;
                 if resume.is_none() {
                     resume = Some(position + 2);
@@ -463,7 +467,7 @@ pub(crate) fn decode_name_into(msg: &[u8], off: usize, out: &mut [u8]) -> Result
                     return Ok((len + 1, resume.unwrap_or(position + 1)));
                 }
                 let l = b as usize;
-                let label = msg
+                let label = message
                     .get(position + 1..position + 1 + l)
                     .ok_or(Error::Truncated)?;
                 let end = len + 1 + l;
@@ -475,7 +479,7 @@ pub(crate) fn decode_name_into(msg: &[u8], off: usize, out: &mut [u8]) -> Result
                 len = end;
                 position += 1 + l;
             }
-            // 0x40 and 0x80 are reserved (RFC 1035 section 4.1.4); nothing valid emits them.
+            // 0x40 and 0x80 are reserved (`RFC 1035` section 4.1.4); nothing valid emits them.
             _ => return Err(Error::BadLabel),
         }
     }
@@ -529,28 +533,28 @@ pub struct Record<'a> {
 pub struct Reader<'a> {
     /// The message's header, decoded on construction.
     pub header: Header,
-    msg: &'a [u8],
+    message: &'a [u8],
     off: usize,
 }
 
 impl<'a> Reader<'a> {
-    /// Start reading `msg`, decoding its header.
-    pub fn new(msg: &'a [u8]) -> Result<Reader<'a>> {
+    /// Start reading `message`, decoding its header.
+    pub fn new(message: &'a [u8]) -> Result<Reader<'a>> {
         Ok(Reader {
-            header: Header::parse(msg)?,
-            msg,
+            header: Header::parse(message)?,
+            message,
             off: HEADER_BYTES,
         })
     }
 
     fn u16_at(&self, off: usize) -> Result<u16> {
-        let b = self.msg.get(off..off + 2).ok_or(Error::Truncated)?;
+        let b = self.message.get(off..off + 2).ok_or(Error::Truncated)?;
         Ok(u16::from_be_bytes([b[0], b[1]]))
     }
 
     /// Read the next question.
     pub fn question(&mut self) -> Result<Question> {
-        let (name, off) = decode_name(self.msg, self.off)?;
+        let (name, off) = decode_name(self.message, self.off)?;
         let record_type = self.u16_at(off)?;
         let class = self.u16_at(off + 2)?;
         self.off = off + 4;
@@ -563,7 +567,7 @@ impl<'a> Reader<'a> {
 
     /// Read the next resource record.
     pub fn record(&mut self) -> Result<Record<'a>> {
-        let (name, off) = decode_name(self.msg, self.off)?;
+        let (name, off) = decode_name(self.message, self.off)?;
         let record_type = self.u16_at(off)?;
         let class = self.u16_at(off + 2)?;
         let ttl_hi = self.u16_at(off + 4)? as u32;
@@ -571,7 +575,7 @@ impl<'a> Reader<'a> {
         let rdlen = self.u16_at(off + 8)? as usize;
         let data_offset = off + 10;
         let data = self
-            .msg
+            .message
             .get(data_offset..data_offset + rdlen)
             .ok_or(Error::Truncated)?;
         self.off = data_offset + rdlen;
@@ -590,8 +594,8 @@ impl<'a> Reader<'a> {
 /// inside the record's own data, though its pointers may reach back anywhere earlier.
 #[doc(alias = "canonical name")]
 #[doc(alias = "CNAME")]
-pub fn canonical_name_target(msg: &[u8], record: &Record<'_>) -> Result<Name> {
-    let (name, end) = decode_name(msg, record.data_offset)?;
+pub fn canonical_name_target(message: &[u8], record: &Record<'_>) -> Result<Name> {
+    let (name, end) = decode_name(message, record.data_offset)?;
     if end != record.data_offset + record.data.len() {
         return Err(Error::BadRecordData);
     }
@@ -627,9 +631,9 @@ pub enum Reject {
     /// The server truncated it. Over UDP, ask again over TCP.
     Truncated,
     /// It does not echo exactly our question: one question, our name (ASCII case aside), type A,
-    /// class IN.
+    /// class `IN`.
     QuestionMismatch,
-    /// The name does not exist (NXDOMAIN).
+    /// The name does not exist (`NXDOMAIN`).
     NoSuchName,
     /// Any other nonzero response code, carried so a caller can report it.
     ServerError(u8),
@@ -640,7 +644,7 @@ pub enum Reject {
     NoIpv4Address,
 }
 
-/// A TTL as a receiver believes it: RFC 2181 section 8 says one with its most significant bit set
+/// A time to live (`TTL`) as a receiver believes it: `RFC 2181` section 8 says one with its most significant bit set
 /// is treated as zero.
 fn believable_time_to_live(time_to_live: u32) -> u32 {
     if time_to_live & 0x8000_0000 != 0 {
@@ -665,8 +669,8 @@ impl Answer {
         &self.ipv4_addresses[..self.count as usize]
     }
 
-    /// The smallest TTL along the chain: how long the whole answer may be believed, in seconds.
-    /// A record whose TTL has its most significant bit set counts as zero, as RFC 2181 section 8
+    /// The smallest `TTL` along the chain: how long the whole answer may be believed, in seconds.
+    /// A record whose `TTL` has its most significant bit set counts as zero, as `RFC 2181` section 8
     /// directs, so an answer carrying one is good for no time.
     #[doc(alias = "TTL")]
     #[doc(alias = "time to live")]
@@ -707,7 +711,7 @@ impl Query {
         &self.name
     }
 
-    /// Write the query message (header with RD set, one question, type A, class IN) into `out`, and
+    /// Write the query message (header with RD set, one question, type A, class `IN`) into `out`, and
     /// return its length. At most [`HEADER_BYTES`] + [`MAXIMUM_NAME_BYTES`] + 4 = 271 bytes, so it
     /// always fits a UDP datagram.
     pub fn request(&self, out: &mut [u8]) -> Result<usize> {
@@ -728,7 +732,7 @@ impl Query {
         Ok(len)
     }
 
-    /// The same query framed for TCP (RFC 7766): a two-byte big-endian length, then the message.
+    /// The same query framed for TCP (`RFC 7766`): a two-byte big-endian length, then the message.
     /// Returns the framed length.
     pub fn request_tcp(&self, out: &mut [u8]) -> Result<usize> {
         let body = out.get_mut(2..).ok_or(Error::Overflow)?;
@@ -864,11 +868,11 @@ impl Query {
             answer.ttl_seconds = answer
                 .ttl_seconds
                 .min(believable_time_to_live(record.ttl_seconds));
-            if let (Some(slot), Ok(address)) = (
+            if let (Some(slot), Ok(ipv4_address)) = (
                 answer.ipv4_addresses.get_mut(answer.count as usize),
                 <[u8; 4]>::try_from(record.data),
             ) {
-                *slot = address;
+                *slot = ipv4_address;
                 answer.count += 1;
             }
         }
@@ -892,7 +896,7 @@ fn response_code_reject(code: u8) -> Reject {
 // =================================================================================================
 
 /// Reassembles one reply that arrives over TCP in pieces: a two-byte length, then that many bytes
-/// (RFC 7766 section 8). One reply per connection, which is all a stub resolver sends for; bytes past the
+/// (`RFC 7766` section 8). One reply per connection, which is all a stub resolver sends for; bytes past the
 /// announced length are [`Error::Trailing`], not the start of a second message.
 ///
 /// # Examples
@@ -905,33 +909,33 @@ fn response_code_reject(code: u8) -> Reject {
 /// let n = query.request_tcp(&mut out).unwrap();
 /// assert_eq!(u16::from_be_bytes([out[0], out[1]]) as usize, n - 2);
 ///
-/// let mut buf = [0u8; 600];
-/// let mut reply = TcpReply::new(&mut buf);
+/// let mut buffer = [0u8; 600];
+/// let mut reply = TcpReply::new(&mut buffer);
 /// assert_eq!(reply.feed(&[0, 3, 1]), Ok(false)); // a length, and one byte of three
 /// assert_eq!(reply.feed(&[2, 3]), Ok(true));
 /// assert_eq!(reply.message(), Some(&[1u8, 2, 3][..]));
 /// ```
 pub struct TcpReply<'a> {
-    buf: &'a mut [u8],
+    buffer: &'a mut [u8],
     have: usize,
 }
 
 impl<'a> TcpReply<'a> {
-    /// Collect into `buf`, which bounds the reply: one announcing more than `buf.len() - 2` bytes is
+    /// Collect into `buffer`, which bounds the reply: one announcing more than `buffer.len() - 2` bytes is
     /// refused when its length arrives, before any of its body is read.
     ///
     /// A buffer no larger than [`MAXIMUM_UDP_MESSAGE_BYTES`] cannot hold the TCP reply that a
     /// truncated UDP reply asks for, which defeats the retry. Size it for the largest reply the
     /// caller accepts, up to [`MAXIMUM_TCP_MESSAGE_BYTES`] + 2.
-    pub fn new(buf: &'a mut [u8]) -> TcpReply<'a> {
-        TcpReply { buf, have: 0 }
+    pub fn new(buffer: &'a mut [u8]) -> TcpReply<'a> {
+        TcpReply { buffer, have: 0 }
     }
 
     fn wanted(&self) -> Option<usize> {
         if self.have < 2 {
             return None;
         }
-        Some(2 + u16::from_be_bytes([self.buf[0], self.buf[1]]) as usize)
+        Some(2 + u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize)
     }
 
     /// Take the next piece. `Ok(true)` once the message is whole.
@@ -939,20 +943,20 @@ impl<'a> TcpReply<'a> {
         while !bytes.is_empty() {
             let limit = match self.wanted() {
                 Some(w) if self.have == w => return Err(Error::Trailing),
-                Some(w) if w > self.buf.len() => return Err(Error::Overflow),
+                Some(w) if w > self.buffer.len() => return Err(Error::Overflow),
                 Some(w) => w,
-                None => 2.min(self.buf.len()),
+                None => 2.min(self.buffer.len()),
             };
             if self.have >= limit {
                 return Err(Error::Overflow);
             }
             let take = (limit - self.have).min(bytes.len());
-            self.buf[self.have..self.have + take].copy_from_slice(&bytes[..take]);
+            self.buffer[self.have..self.have + take].copy_from_slice(&bytes[..take]);
             self.have += take;
             bytes = &bytes[take..];
         }
         match self.wanted() {
-            Some(w) if w > self.buf.len() => Err(Error::Overflow),
+            Some(w) if w > self.buffer.len() => Err(Error::Overflow),
             Some(w) => Ok(self.have == w),
             None => Ok(false),
         }
@@ -961,7 +965,7 @@ impl<'a> TcpReply<'a> {
     /// The message, without its length, once [`TcpReply::feed`] has said it is whole.
     pub fn message(&self) -> Option<&[u8]> {
         match self.wanted() {
-            Some(w) if self.have == w => Some(&self.buf[2..w]),
+            Some(w) if self.have == w => Some(&self.buffer[2..w]),
             _ => None,
         }
     }
