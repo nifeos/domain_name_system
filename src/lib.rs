@@ -1,5 +1,4 @@
-//! **The Domain Name System (DNS) wire format a stub resolver needs** (Request for Comments (RFC)
-//! 1035; RFC 7766 for the Transmission Control Protocol, TCP), as pure
+//! **The Domain Name System (DNS) wire format a stub resolver needs** (`RFC 1035`; `RFC 7766` for the Transmission Control Protocol, TCP), as pure
 //! computation: the bytes of a query for one name's Internet Protocol version 4 (IPv4) addresses, and the checks a reply must pass
 //! before any address in it is believed. No socket, timer or policy; which program sends these
 //! bytes, and which names a client may ask about, are the caller's policy.
@@ -14,7 +13,7 @@
 //! # BUGS
 //!
 //! - IPv4 only: a query asks for address records alone, so it reads no address longer than four bytes.
-//! - No Extension Mechanisms for DNS (EDNS) version 0, so UDP (the User Datagram Protocol) replies stop at [`MAXIMUM_UDP_MESSAGE_BYTES`] and a larger answer costs a TCP
+//! - No Extension Mechanisms for DNS (`EDNS`) version 0, so UDP (the User Datagram Protocol) replies stop at [`MAXIMUM_UDP_MESSAGE_BYTES`] and a larger answer costs a TCP
 //!   retry.
 //! - No DNS Security Extensions (DNSSEC): an on-path attacker can forge the reply, id and all. No "0x20" case randomization.
 //! - At most [`MAXIMUM_IPV4_ADDRESSES`] addresses are kept from one answer; the rest are dropped.
@@ -33,14 +32,14 @@
 #[cfg(kani)]
 mod proofs;
 
-/// The port a name server listens on, over UDP and TCP alike (RFC 1035 section 4.2).
+/// The port a name server listens on, over UDP and TCP alike (`RFC 1035` section 4.2).
 pub const PORT: u16 = 53;
 
-/// The largest message RFC 1035 lets travel over the User Datagram Protocol (UDP) without EDNS
+/// The largest message `RFC 1035` lets travel over the User Datagram Protocol (UDP) without `EDNS`
 /// (section 4.2.1). A reply that would be larger arrives truncated, with [`FLAG_TRUNCATED`] set.
 pub const MAXIMUM_UDP_MESSAGE_BYTES: usize = 512;
 
-/// The largest message RFC 7766 lets travel over TCP: its two-byte length prefix counts up to
+/// The largest message `RFC 7766` lets travel over TCP: its two-byte length prefix counts up to
 /// 65,535 bytes, and the prefix itself comes on top.
 pub const MAXIMUM_TCP_MESSAGE_BYTES: usize = 65_535;
 
@@ -69,7 +68,7 @@ pub const FLAG_RECURSION_DESIRED: u16 = 0x0100;
 #[doc(alias = "RCODE")]
 pub const RESPONSE_CODE_MASK: u16 = 0x000f;
 
-/// The response code a server sends for a name that does not exist (RFC 1035's "Name Error").
+/// The response code a server sends for a name that does not exist (`RFC 1035`'s "Name Error").
 #[doc(alias = "RCODE")]
 #[doc(alias = "NXDOMAIN")]
 pub const RESPONSE_CODE_NAME_ERROR: u8 = 3;
@@ -92,7 +91,7 @@ pub mod record_type {
 pub const CLASS_IN: u16 = 1;
 
 /// How many canonical name links [`Query::accept`] follows before giving up. Real chains are one or two
-/// links (a CDN alias, sometimes a second); eight leaves room for that and stops a reply that chains
+/// links (a content delivery network (CDN) alias, sometimes a second); eight leaves room for that and stops a reply that chains
 /// a name through itself from costing more than eight scans of its own answer section.
 pub const MAXIMUM_CHAIN: usize = 8;
 
@@ -105,7 +104,7 @@ pub const MAXIMUM_IPV4_ADDRESSES: usize = 8;
 /// errors are a caller's mistake (a buffer too small, a name that cannot be one) and are reported
 /// rather than panicking, because a resolver must not be crashable by its own client's input.
 ///
-/// Non-exhaustive: Longer addresses or EDNS(0) would add variants, so a caller matches with a
+/// Non-exhaustive: Longer addresses or `EDNS` version 0 would add variants, so a caller matches with a
 /// wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -147,7 +146,8 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub struct Header {
     /// The transaction id a reply must echo.
     pub id: u16,
-    /// QR, the opcode, AA, TC, RD, RA and the response code, packed.
+    /// The Query/Response (QR) bit, the opcode, AA, `TC`, recursion desired (RD), recursion
+    /// available (RA) and the response code, packed.
     pub flags: u16,
     /// How many questions follow.
     #[doc(alias = "QDCOUNT")]
@@ -209,7 +209,7 @@ impl Header {
 /// A name in uncompressed wire form (length-prefixed labels, ending in the empty root label), in a
 /// fixed buffer. 255 bytes is the protocol's own maximum, so this type holds every valid name.
 ///
-/// **Equality is DNS equality**: ASCII letters compare without regard to case (RFC 4343), because a
+/// **Equality is DNS equality**: ASCII letters compare without regard to case (`RFC 4343`), because a
 /// server may answer `Packages.Example.Test` to a question about `packages.example.test` and mean the
 /// same name. `Debug` and `Display` print the dotted form, and [`FromStr`](core::str::FromStr)
 /// reads it ([`Name::from_dotted`]).
@@ -241,7 +241,7 @@ impl Name {
     /// Each label is 1 to 63 bytes of ASCII letters, digits, `-` and `_` (see the crate's BUGS), and
     /// the whole is at most 255 bytes in wire form. `""` and `"."` are the root.
     ///
-    /// This is the DNS label alphabet the crate chose, not RFC 1123 host-name syntax: `-a.test`,
+    /// This is the DNS label alphabet the crate chose, not `RFC 1123` host-name syntax: `-a.test`,
     /// `a-.test` and `_acme-challenge.test` all pass. A caller that wants host-name rules checks
     /// them itself.
     ///
@@ -475,7 +475,7 @@ pub(crate) fn decode_name_into(msg: &[u8], off: usize, out: &mut [u8]) -> Result
                 len = end;
                 position += 1 + l;
             }
-            // 0x40 and 0x80 are reserved (RFC 1035 section 4.1.4); nothing valid emits them.
+            // 0x40 and 0x80 are reserved (`RFC 1035` section 4.1.4); nothing valid emits them.
             _ => return Err(Error::BadLabel),
         }
     }
@@ -627,9 +627,9 @@ pub enum Reject {
     /// The server truncated it. Over UDP, ask again over TCP.
     Truncated,
     /// It does not echo exactly our question: one question, our name (ASCII case aside), type A,
-    /// class IN.
+    /// class `IN`.
     QuestionMismatch,
-    /// The name does not exist (NXDOMAIN).
+    /// The name does not exist (`NXDOMAIN`).
     NoSuchName,
     /// Any other nonzero response code, carried so a caller can report it.
     ServerError(u8),
@@ -640,7 +640,7 @@ pub enum Reject {
     NoIpv4Address,
 }
 
-/// A TTL as a receiver believes it: RFC 2181 section 8 says one with its most significant bit set
+/// A time to live (`TTL`) as a receiver believes it: `RFC 2181` section 8 says one with its most significant bit set
 /// is treated as zero.
 fn believable_time_to_live(time_to_live: u32) -> u32 {
     if time_to_live & 0x8000_0000 != 0 {
@@ -665,8 +665,8 @@ impl Answer {
         &self.ipv4_addresses[..self.count as usize]
     }
 
-    /// The smallest TTL along the chain: how long the whole answer may be believed, in seconds.
-    /// A record whose TTL has its most significant bit set counts as zero, as RFC 2181 section 8
+    /// The smallest `TTL` along the chain: how long the whole answer may be believed, in seconds.
+    /// A record whose `TTL` has its most significant bit set counts as zero, as `RFC 2181` section 8
     /// directs, so an answer carrying one is good for no time.
     #[doc(alias = "TTL")]
     #[doc(alias = "time to live")]
@@ -707,7 +707,7 @@ impl Query {
         &self.name
     }
 
-    /// Write the query message (header with RD set, one question, type A, class IN) into `out`, and
+    /// Write the query message (header with RD set, one question, type A, class `IN`) into `out`, and
     /// return its length. At most [`HEADER_BYTES`] + [`MAXIMUM_NAME_BYTES`] + 4 = 271 bytes, so it
     /// always fits a UDP datagram.
     pub fn request(&self, out: &mut [u8]) -> Result<usize> {
@@ -728,7 +728,7 @@ impl Query {
         Ok(len)
     }
 
-    /// The same query framed for TCP (RFC 7766): a two-byte big-endian length, then the message.
+    /// The same query framed for TCP (`RFC 7766`): a two-byte big-endian length, then the message.
     /// Returns the framed length.
     pub fn request_tcp(&self, out: &mut [u8]) -> Result<usize> {
         let body = out.get_mut(2..).ok_or(Error::Overflow)?;
@@ -892,7 +892,7 @@ fn response_code_reject(code: u8) -> Reject {
 // =================================================================================================
 
 /// Reassembles one reply that arrives over TCP in pieces: a two-byte length, then that many bytes
-/// (RFC 7766 section 8). One reply per connection, which is all a stub resolver sends for; bytes past the
+/// (`RFC 7766` section 8). One reply per connection, which is all a stub resolver sends for; bytes past the
 /// announced length are [`Error::Trailing`], not the start of a second message.
 ///
 /// # Examples

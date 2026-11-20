@@ -4,7 +4,7 @@
 //! takes as seeds) were captured on 2026-10-04 (UTC) from
 //! 1.1.1.1 with a short Python script sending exactly the query `Query::request` writes (`tests/fixtures/README.md` has it and the id each carries), so they carry what a recursive
 //! server really does: compression pointers into the question, a canonical name pointing into its own owner,
-//! TTLs that differ along a chain. The rest are built by hand below, one per check, because nobody
+//! time to live values that differ along a chain. The rest are built by hand below, one per check, because nobody
 //! captures a forgery.
 
 use domain_name_system::{
@@ -15,9 +15,9 @@ use domain_name_system::{
 /// `example.com` A, id 0x1111: two A records, owners compressed to the question.
 const REAL_EXAMPLE: &[u8] = include_bytes!("fixtures/example.com.dns");
 /// `www.github.com` A, id 0x2222: a canonical name to `github.com` (a pointer into the question's own name)
-/// with TTL 1952, then github.com's A with TTL 33.
+/// with `TTL` 1952, then github.com's A with `TTL` 33.
 const REAL_GITHUB: &[u8] = include_bytes!("fixtures/www.github.com.dns");
-/// `nosuch.invalid` A, id 0x3333: NXDOMAIN, no records.
+/// `nosuch.invalid` A, id 0x3333: `NXDOMAIN`, no records.
 const REAL_NXDOMAIN: &[u8] = include_bytes!("fixtures/nosuch.invalid.dns");
 
 #[test]
@@ -352,7 +352,7 @@ fn addresses_past_the_limit_are_dropped_and_the_rest_kept() {
     );
 }
 
-/// RFC 2181 section 8: a TTL with its most significant bit set is read as zero. An answer is good
+/// `RFC 2181` section 8: a `TTL` with its most significant bit set is read as zero. An answer is good
 /// for the shortest of its records' lifetimes, so one such record on the chain or among the
 /// addresses makes the whole answer good for no time at all, rather than for about 136 years.
 #[test]
@@ -712,7 +712,7 @@ fn an_oversized_tcp_reply_is_refused_when_its_body_comes_with_its_length() {
     assert_eq!(reply.feed(&piece), Err(Error::Overflow));
 }
 
-/// A record's TTL is two 16-bit halves on the wire, high half first; one past 65,535 seconds
+/// A record's `TTL` is two 16-bit halves on the wire, high half first; one past 65,535 seconds
 /// needs both.
 #[test]
 fn a_time_to_live_wider_than_sixteen_bits_reads_whole() {

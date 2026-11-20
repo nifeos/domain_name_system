@@ -8,7 +8,7 @@
 
 //! # What is asserted, beyond "it returned"
 //!
-//! 1. **An accepted address is really there.** Each address `accept` returns is a class-IN A
+//! 1. **An accepted address is really there.** Each address `accept` returns is a class-`IN` A
 //!    record's data in the answer section, owned by the canonical name `accept` reports, which is
 //!    ours or reached from ours by a canonical name there; a second, independent walk checks it. Falsified on
 //!    2026-10-04: with `accept`'s owner check deleted, it fired within two minutes of the captures.
@@ -42,7 +42,7 @@ fn dotted(name: &Name) -> Option<String> {
     Some(out)
 }
 
-/// Every class-IN record of `record_type` in the answer section, as (owner, data offset, data).
+/// Every class-`IN` record of `record_type` in the answer section, as (owner, data offset, data).
 fn answers(reply: &[u8], record_type: u16) -> Vec<(Name, usize, Vec<u8>)> {
     let mut found = Vec::new();
     let Ok(mut reader) = Reader::new(reply) else {
