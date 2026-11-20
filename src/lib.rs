@@ -864,11 +864,11 @@ impl Query {
             answer.ttl_seconds = answer
                 .ttl_seconds
                 .min(believable_time_to_live(record.ttl_seconds));
-            if let (Some(slot), Ok(address)) = (
+            if let (Some(slot), Ok(ipv4_address)) = (
                 answer.ipv4_addresses.get_mut(answer.count as usize),
                 <[u8; 4]>::try_from(record.data),
             ) {
-                *slot = address;
+                *slot = ipv4_address;
                 answer.count += 1;
             }
         }

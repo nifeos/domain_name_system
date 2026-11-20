@@ -21,7 +21,7 @@ const REAL_GITHUB: &[u8] = include_bytes!("fixtures/www.github.com.dns");
 const REAL_NXDOMAIN: &[u8] = include_bytes!("fixtures/nosuch.invalid.dns");
 
 #[test]
-fn a_real_reply_with_two_addresses_gives_both_in_order() {
+fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
     let query = Query::new(0x1111, "example.com").unwrap();
     let answer = query.accept(REAL_EXAMPLE).unwrap();
     assert_eq!(
@@ -132,13 +132,13 @@ impl Reply {
         self.set_header(|h| h.answer_count += 1)
     }
 
-    fn a(self, owner: &str, address: [u8; 4]) -> Reply {
+    fn a(self, owner: &str, ipv4_address: [u8; 4]) -> Reply {
         self.record(
             &wire(owner),
             record_type::IPV4_ADDRESS,
             CLASS_IN,
             60,
-            &address,
+            &ipv4_address,
         )
     }
 
@@ -242,7 +242,7 @@ fn response_codes_are_named_and_carried() {
 }
 
 #[test]
-fn an_address_for_another_name_is_never_taken() {
+fn an_ipv4_address_for_another_name_is_never_taken() {
     // The cache-poisoning shape: a reply about our name that also "helpfully" carries an address
     // for somebody else's. Only ours comes out, and a reply carrying only theirs gives nothing.
     let mixed = Reply::to(OURS)
@@ -254,7 +254,7 @@ fn an_address_for_another_name_is_never_taken() {
 }
 
 #[test]
-fn an_empty_answer_section_is_no_address() {
+fn an_empty_answer_section_is_no_ipv4_address() {
     assert_eq!(Reply::to(OURS).judged(), Err(Reject::NoIpv4Address));
 }
 
@@ -276,7 +276,7 @@ fn a_chain_is_followed_in_any_order_and_only_from_our_name() {
 }
 
 #[test]
-fn an_address_for_our_name_beside_its_canonical_name_is_not_taken() {
+fn an_ipv4_address_for_our_name_beside_its_canonical_name_is_not_taken() {
     // A name with a canonical name has no other data (RFC 1034 section 3.6.2), so the chain's end is what counts.
     let r = Reply::to(OURS)
         .a(OURS, [6, 6, 6, 6])
@@ -339,7 +339,7 @@ fn other_record_types_are_ignored() {
 }
 
 #[test]
-fn addresses_past_the_limit_are_dropped_and_the_rest_kept() {
+fn ipv4_addresses_past_the_limit_are_dropped_and_the_rest_kept() {
     let mut r = Reply::to(OURS);
     for i in 0..(MAXIMUM_IPV4_ADDRESSES as u8 + 2) {
         r = r.a(OURS, [10, 0, 2, i]);
@@ -358,7 +358,7 @@ fn addresses_past_the_limit_are_dropped_and_the_rest_kept() {
 #[test]
 fn a_time_to_live_with_the_high_bit_set_is_zero() {
     for high in [0x8000_0000u32, 0xffff_ffff] {
-        let address_only = Reply::to(OURS)
+        let ipv4_address_only = Reply::to(OURS)
             .record(
                 &wire(OURS),
                 record_type::IPV4_ADDRESS,
@@ -369,7 +369,7 @@ fn a_time_to_live_with_the_high_bit_set_is_zero() {
             .bytes;
         let answer = Query::new(OUR_ID, OURS)
             .unwrap()
-            .accept(&address_only)
+            .accept(&ipv4_address_only)
             .unwrap();
         assert_eq!(answer.ttl_seconds(), 0, "{high:#x} on the address");
 
@@ -411,7 +411,7 @@ fn a_time_to_live_with_the_high_bit_set_is_zero() {
 }
 
 #[test]
-fn the_time_to_live_is_the_smallest_on_the_chain_and_among_the_addresses() {
+fn the_time_to_live_is_the_smallest_on_the_chain_and_among_the_ipv4_addresses() {
     let r = Reply::to(OURS)
         .record(
             &wire(OURS),
