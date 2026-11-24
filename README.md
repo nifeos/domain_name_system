@@ -1,9 +1,9 @@
 # domain_name_system
 
-[![check](https://github.com/nifeos/domain_name_system/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nifeos/domain_name_system/actions/workflows/ci.yml?query=branch%3Amain)
-[![proofs](https://github.com/nifeos/domain_name_system/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/nifeos/domain_name_system/actions/workflows/proofs.yml?query=branch%3Amain)
-[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/domain_name_system#license)
-[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/domain_name_system/blob/main/Cargo.toml)
+[![check](https://github.com/partsfoundry/domain_name_system/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/partsfoundry/domain_name_system/actions/workflows/ci.yml?query=branch%3Amain)
+[![proofs](https://github.com/partsfoundry/domain_name_system/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/partsfoundry/domain_name_system/actions/workflows/proofs.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/partsfoundry/domain_name_system#license)
+[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/partsfoundry/domain_name_system/blob/main/Cargo.toml)
 
 The Domain Name System (DNS) wire format a stub resolver needs, as pure computation. `RFC 1035` defines it, and `RFC 7766` defines its use over the Transmission Control Protocol (TCP).
 It writes the bytes of a query for one name's Internet Protocol version 4 (IPv4) addresses. It also runs the checks a reply must
