@@ -146,6 +146,27 @@ pub enum Error {
     Trailing,
 }
 
+/// One lowercase phrase per variant, with no trailing period, as the standard library's errors
+/// print, so a caller can embed it in a sentence of its own.
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Error::Truncated => "the message ends before the structure it promised",
+            Error::BadLabel => "a label uses a reserved tag or is empty",
+            Error::LabelTooLong => "a label is longer than 63 bytes",
+            Error::NameTooLong => "a name is longer than 255 bytes in wire form",
+            Error::BadCharacter => "a name holds a byte outside letters, digits, `-` and `_`",
+            Error::PointerForward => "a compression pointer does not point strictly backwards",
+            Error::TooManyPointers => "a name follows too many compression pointers",
+            Error::BadRecordData => "a record's data is the wrong shape for its type",
+            Error::Overflow => "the buffer is too small for the message",
+            Error::Trailing => "bytes follow the message the TCP length announced",
+        })
+    }
+}
+
+impl core::error::Error for Error {}
+
 /// This crate's results.
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -661,6 +682,36 @@ pub enum Reject {
     ChainTooLong,
     /// The name exists and has no A record, or the answer holds addresses only for other names.
     NoIpv4Address,
+}
+
+/// The check that refused the reply, as one lowercase phrase. [`Reject::Malformed`] names no detail
+/// itself: its [`Error`] is the [`source`](core::error::Error::source), so a caller that prints
+/// the chain sees both without either repeating the other.
+impl core::fmt::Display for Reject {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Reject::Malformed(_) => f.write_str("the reply is not a well-formed DNS message"),
+            Reject::NotAResponse => {
+                f.write_str("the message is not a response to a standard query")
+            }
+            Reject::IdMismatch => f.write_str("the reply carries another transaction id"),
+            Reject::Truncated => f.write_str("the server truncated the reply"),
+            Reject::QuestionMismatch => f.write_str("the reply does not echo the question asked"),
+            Reject::NoSuchName => f.write_str("the name does not exist"),
+            Reject::ServerError(code) => write!(f, "the server answered with response code {code}"),
+            Reject::ChainTooLong => f.write_str("the canonical name chain is too long or loops"),
+            Reject::NoIpv4Address => f.write_str("the reply holds no IPv4 address for the name"),
+        }
+    }
+}
+
+impl core::error::Error for Reject {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Reject::Malformed(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 /// A time to live (`TTL`) as a receiver believes it: `RFC 2181` section 8 says one with its most significant bit set

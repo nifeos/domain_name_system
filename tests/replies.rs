@@ -29,7 +29,10 @@ fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
     let answer = query.accept(REAL_EXAMPLE).unwrap();
     assert_eq!(
         answer.ipv4_addresses(),
-        &[Ipv4Addr::new(104, 20, 23, 154), Ipv4Addr::new(172, 66, 147, 243)]
+        &[
+            Ipv4Addr::new(104, 20, 23, 154),
+            Ipv4Addr::new(172, 66, 147, 243)
+        ]
     );
     assert_eq!(answer.ttl_seconds(), 0x31);
     assert_eq!(
@@ -873,5 +876,39 @@ fn a_maximum_size_reply_built_on_a_long_pointer_chain_is_refused_at_the_chain() 
     assert_eq!(
         reply.judged(),
         Err(Reject::Malformed(Error::TooManyPointers))
+    );
+}
+
+#[test]
+fn a_refusal_prints_and_chains_to_the_error_inside_it() {
+    use std::error::Error as _;
+
+    let malformed = Reject::Malformed(Error::PointerForward);
+    assert_eq!(
+        malformed.to_string(),
+        "the reply is not a well-formed DNS message"
+    );
+    let source = malformed
+        .source()
+        .expect("a malformed reply names its error");
+    assert_eq!(
+        source.to_string(),
+        "a compression pointer does not point strictly backwards"
+    );
+    assert_eq!(source.downcast_ref::<Error>(), Some(&Error::PointerForward));
+    assert!(Reject::IdMismatch.source().is_none());
+    assert_eq!(
+        Reject::ServerError(2).to_string(),
+        "the server answered with response code 2"
+    );
+
+    // `?` carries either into a boxed error.
+    fn boxed() -> Result<(), Box<dyn std::error::Error>> {
+        Name::from_dotted("a..b")?;
+        Ok(())
+    }
+    assert_eq!(
+        boxed().unwrap_err().to_string(),
+        "a label uses a reserved tag or is empty"
     );
 }
