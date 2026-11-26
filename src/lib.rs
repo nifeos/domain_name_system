@@ -559,8 +559,8 @@ pub(crate) fn decode_name_into(
 // Reading a message.
 // =================================================================================================
 
-/// A decoded question.
-#[derive(Debug, Clone, Copy)]
+/// A decoded question. Equal when every field is, the name compared as [`Name`] compares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Question {
     /// The name asked about.
     pub name: Name,
@@ -575,7 +575,9 @@ pub struct Question {
 /// A decoded resource record: its fixed fields and its raw data. Data that holds a name (a canonical name's)
 /// may be compressed against the whole message (a canonical name's is; an A record's is four plain bytes),
 /// so [`canonical_name_target`] takes the message too, and `data_offset` says where the data sits in it.
-#[derive(Debug, Clone, Copy)]
+/// Equal when every field is, `data_offset` included, so two records equal in content but read
+/// from different places are not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Record<'a> {
     /// The record's owner.
     pub name: Name,
@@ -599,12 +601,24 @@ pub struct Record<'a> {
 /// Walks one message in wire order: the header, then [`Reader::question`] `question_count` times, then
 /// [`Reader::record`] for each record. The reader does not count for you. It is `Clone`, so a caller
 /// can rescan a section from a saved position.
+///
+/// `Debug` prints the header, the read position and the message's length, not the message.
 #[derive(Clone)]
 pub struct Reader<'a> {
     /// The message's header, decoded on construction.
     pub header: Header,
     message: &'a [u8],
     off: usize,
+}
+
+impl core::fmt::Debug for Reader<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Reader")
+            .field("header", &self.header)
+            .field("position", &self.off)
+            .field("message_length", &self.message.len())
+            .finish()
+    }
 }
 
 impl<'a> Reader<'a> {
@@ -681,7 +695,7 @@ pub fn canonical_name_target(message: &[u8], record: &Record<'_>) -> Result<Name
 /// The id is the caller's to choose, and over UDP it should be unguessable: it is the only thing an
 /// off-path forger has to guess. This crate has no randomness of its own, deliberately, for the
 /// reason `network_time_protocol::Query::with_nonce` takes its nonce as an argument.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Query {
     id: u16,
     name: Name,
@@ -1020,9 +1034,22 @@ fn response_code_reject(code: u8) -> Reject {
 /// assert_eq!(reply.feed(&[2, 3]), Ok(true));
 /// assert_eq!(reply.message(), Some(&[1u8, 2, 3][..]));
 /// ```
+///
+/// `Debug` prints how many bytes have arrived, how many the frame holds once its length has arrived,
+/// both counting the two-byte length, and the buffer's capacity; it prints none of the bytes.
 pub struct TcpReply<'a> {
     buffer: &'a mut [u8],
     have: usize,
+}
+
+impl core::fmt::Debug for TcpReply<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TcpReply")
+            .field("received", &self.have)
+            .field("expected", &self.wanted())
+            .field("capacity", &self.buffer.len())
+            .finish()
+    }
 }
 
 impl<'a> TcpReply<'a> {

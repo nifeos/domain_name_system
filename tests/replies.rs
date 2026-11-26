@@ -912,3 +912,30 @@ fn a_refusal_prints_and_chains_to_the_error_inside_it() {
         "a label uses a reserved tag or is empty"
     );
 }
+
+#[test]
+fn a_parsed_question_equals_the_one_sent_and_the_state_types_print_positions() {
+    let query = Query::new(7, "example.test").unwrap();
+    let mut out = [0u8; 512];
+    let n = query.request(&mut out).unwrap();
+    let mut reader = Reader::new(&out[..n]).unwrap();
+    let question = reader.question().unwrap();
+    assert_eq!(
+        question,
+        domain_name_system::Question {
+            name: *query.name(),
+            record_type: record_type::IPV4_ADDRESS,
+            class: CLASS_IN,
+        }
+    );
+    assert_eq!(query, Query::for_name(7, *query.name()));
+    assert!(format!("{reader:?}").contains(&format!("position: {n}, message_length: {n}")));
+
+    let mut buffer = [0u8; 16];
+    let mut tcp = TcpReply::new(&mut buffer);
+    tcp.feed(&[0, 3, 1]).unwrap();
+    assert_eq!(
+        format!("{tcp:?}"),
+        "TcpReply { received: 3, expected: Some(5), capacity: 16 }"
+    );
+}
