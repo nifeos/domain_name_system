@@ -9,6 +9,31 @@
 //! [`Query::accept`] believes as little as it can: [`Reject`] lists its nine refusals, in check
 //! order. Only A records owned by the end of the canonical name chain from our name are taken, so a reply
 //! about `example.com` cannot plant an address for `bank.test`; authority and additional go unread.
+//!
+//! # Examples
+//!
+//! A query, the reply a recursive server would send to it, and the address it gives:
+//!
+//! ```
+//! use core::net::Ipv4Addr;
+//!
+//! use domain_name_system::Query;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let query = Query::new(0x4e1f, "packages.example.test")?;
+//! let mut reply = [0u8; 512];
+//! let n = query.request(&mut reply)?;
+//! let mut reply = reply[..n].to_vec();
+//! reply[2] |= 0x80; // QR: a response
+//! reply[7] = 1; // ANCOUNT = 1
+//! // One A record, its owner a pointer to the question's name, TTL 300, then the address.
+//! reply.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 0x2c, 0, 4, 10, 0, 2, 9]);
+//!
+//! let answer = query.accept(&reply)?;
+//! assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
+//! # Ok(())
+//! # }
+//! ```
 
 //! # BUGS
 //!
@@ -33,6 +58,11 @@ use core::net::Ipv4Addr;
 
 #[cfg(kani)]
 mod proofs;
+
+/// The README's examples, run by `cargo test` so that the text a reader meets first still compiles.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 /// The port a name server listens on, over UDP and TCP alike (`RFC 1035` section 4.2).
 pub const PORT: u16 = 53;

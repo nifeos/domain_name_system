@@ -19,33 +19,38 @@ lists its nine refusals in the order the checks run.
 
 ## EXAMPLES
 
+`cargo test` runs this example, because the crate includes this file as a doctest.
+
 ```rust
 use core::net::Ipv4Addr;
 
 use domain_name_system::{Query, Reject};
 
-let query = Query::new(0x4e1f, "packages.example.test").unwrap();
-let mut request = [0u8; 512];
-let n = query.request(&mut request).unwrap();
-assert_eq!(&request[..2], &[0x4e, 0x1f]); // our transaction id
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let query = Query::new(0x4e1f, "packages.example.test")?;
+    let mut request = [0u8; 512];
+    let n = query.request(&mut request)?;
+    assert_eq!(&request[..2], &[0x4e, 0x1f]); // our transaction id
 
-// The reply: our header with QR and RA set, our question back, then one A record.
-let mut reply = request[..n].to_vec();
-reply[2] |= 0x80; // QR: a response
-reply[3] |= 0x80; // RA
-reply[7] = 1; // ANCOUNT = 1
-reply.extend_from_slice(&[0xc0, 0x0c]); // owner: a pointer to the question's name
-reply.extend_from_slice(&[0, 1, 0, 1]); // type A, class IN
-reply.extend_from_slice(&300u32.to_be_bytes()); // TTL
-reply.extend_from_slice(&[0, 4, 10, 0, 2, 9]); // RDLENGTH 4, then the address
+    // The reply: our header with QR and RA set, our question back, then one A record.
+    let mut reply = request[..n].to_vec();
+    reply[2] |= 0x80; // QR: a response
+    reply[3] |= 0x80; // RA
+    reply[7] = 1; // ANCOUNT = 1
+    reply.extend_from_slice(&[0xc0, 0x0c]); // owner: a pointer to the question's name
+    reply.extend_from_slice(&[0, 1, 0, 1]); // type A, class IN
+    reply.extend_from_slice(&300u32.to_be_bytes()); // TTL
+    reply.extend_from_slice(&[0, 4, 10, 0, 2, 9]); // RDLENGTH 4, then the address
 
-let answer = query.accept(&reply).unwrap();
-assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
-assert_eq!(answer.ttl(), 300);
+    let answer = query.accept(&reply)?;
+    assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
+    assert_eq!(answer.ttl_seconds(), 300);
 
-// The same bytes under somebody else's transaction id are not an answer to us.
-reply[1] ^= 1;
-assert_eq!(query.accept(&reply), Err(Reject::IdMismatch));
+    // The same bytes under somebody else's transaction id are not an answer to us.
+    reply[1] ^= 1;
+    assert_eq!(query.accept(&reply), Err(Reject::IdMismatch));
+    Ok(())
+}
 ```
 
 Over TCP, `Query::request_tcp` writes the two-byte length prefix and `TcpReply` collects a reply from
