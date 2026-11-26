@@ -939,3 +939,15 @@ fn a_parsed_question_equals_the_one_sent_and_the_state_types_print_positions() {
         "TcpReply { received: 3, expected: Some(5), capacity: 16 }"
     );
 }
+
+#[test]
+fn names_equal_without_regard_to_case_are_one_key() {
+    use std::collections::HashSet;
+
+    let mut cache = HashSet::new();
+    assert!(cache.insert(Name::from_dotted("Packages.Example.Test").unwrap()));
+    assert!(!cache.insert(Name::from_dotted("packages.example.test").unwrap()));
+    assert!(cache.contains(&Name::from_dotted("PACKAGES.EXAMPLE.TEST.").unwrap()));
+    assert!(!cache.contains(&Name::from_dotted("packages.example").unwrap()));
+    assert_eq!(cache.len(), 1);
+}

@@ -278,8 +278,7 @@ impl Header {
 /// same name. `Debug` and `Display` print the dotted form, and [`FromStr`](core::str::FromStr)
 /// reads it ([`Name::from_dotted`]).
 ///
-/// There is no `Hash`: with case-insensitive equality a hash would have to fold case first, and a
-/// caller that wants a key folds the bytes itself.
+/// `Hash` folds case the same way, so equal names hash equally and a `Name` can key a cache.
 #[derive(Clone, Copy)]
 pub struct Name {
     bytes: [u8; MAXIMUM_NAME_BYTES],
@@ -426,6 +425,16 @@ impl PartialEq for Name {
 }
 
 impl Eq for Name {}
+
+/// Each wire byte lowercased as it goes to the hasher, so names that are equal hash equally. The
+/// root label ends every name, so no name's bytes are a prefix of another's.
+impl core::hash::Hash for Name {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        for b in self.as_bytes() {
+            state.write_u8(b.to_ascii_lowercase());
+        }
+    }
+}
 
 impl core::fmt::Debug for Name {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
