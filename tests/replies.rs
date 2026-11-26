@@ -8,8 +8,9 @@
 //! captures a forgery.
 
 use domain_name_system::{
-    CLASS_IN, Error, FLAG_TRUNCATED, Header, MAXIMUM_CHAIN, MAXIMUM_IPV4_ADDRESSES, Name, Query,
-    Reader, Reject, TcpReply, canonical_name_target, decode_name, record_type,
+    CLASS_IN, Error, FLAG_TRUNCATED, Header, MAXIMUM_CHAIN, MAXIMUM_IPV4_ADDRESSES,
+    MAXIMUM_POINTERS, Name, Query, Reader, Reject, TcpReply, canonical_name_target, decode_name,
+    record_type,
 };
 
 /// `example.com` A, id 0x1111: two A records, owners compressed to the question.
@@ -778,4 +779,97 @@ fn the_sizes_the_crate_documents_are_the_sizes_it_has() {
     assert_eq!(size_of::<Name>(), 256);
     assert_eq!(size_of::<Answer>(), 296);
     assert_eq!(size_of::<Result<Answer, Reject>>(), 300);
+}
+
+// =================================================================================================
+// The bound on compression pointers per name.
+// =================================================================================================
+
+/// A message of `hops` pointers in a row, each naming the one before it, the first naming `OURS` in
+/// the question. Returns the message and the offset of the last pointer.
+fn pointer_chain(hops: usize) -> (Vec<u8>, usize) {
+    let mut message = Reply::to(OURS).bytes;
+    let mut previous = 12; // the question's name
+    let mut last = 0;
+    for _ in 0..hops {
+        last = message.len();
+        message.extend([0xc0 | (previous >> 8) as u8, previous as u8]);
+        previous = last;
+    }
+    (message, last)
+}
+
+#[test]
+fn a_chain_of_exactly_maximum_pointers_decodes_and_one_more_is_refused() {
+    let (message, last) = pointer_chain(MAXIMUM_POINTERS);
+    let (name, resume) = decode_name(&message, last).unwrap();
+    assert_eq!(name, Name::from_dotted(OURS).unwrap());
+    assert_eq!(resume, last + 2);
+
+    let (message, last) = pointer_chain(MAXIMUM_POINTERS + 1);
+    assert_eq!(decode_name(&message, last), Err(Error::TooManyPointers));
+}
+
+#[test]
+fn a_longest_legal_name_built_by_compression_one_label_at_a_time_still_decodes() {
+    // 127 one-byte labels is the longest name there is (255 bytes on the wire). Each name is one
+    // label and a pointer to the name before it, so the last one follows 126 pointers, the most an
+    // encoder that compresses every suffix can produce.
+    let mut message = vec![0u8; 12];
+    let mut previous = None;
+    let mut starts = Vec::new();
+    for _ in 0..127 {
+        let start = message.len();
+        starts.push(start);
+        message.extend([1, b'a']);
+        match previous {
+            Some(p) => message.extend([0xc0 | (p >> 8) as u8, p as u8]),
+            None => message.push(0),
+        }
+        previous = Some(start);
+    }
+    let (name, resume) = decode_name(&message, *starts.last().unwrap()).unwrap();
+    assert_eq!(name.as_bytes().len(), 255);
+    assert!(name.as_bytes().chunks(2).take(127).all(|c| c == [1, b'a']));
+    assert_eq!(resume, message.len());
+}
+
+#[test]
+fn a_maximum_size_reply_built_on_a_long_pointer_chain_is_refused_at_the_chain() {
+    // A TCP reply at the 65,535-byte limit: a record whose data is a long chain of pointers (the
+    // data is ignored as a type this crate does not read, but its bytes are in the message), then
+    // thousands of A records whose owners point at the end of that chain, then two canonical names.
+    let chain_hops = 8000;
+    let mut reply = Reply::to(OURS);
+    let data_start = reply.bytes.len() + 2 + 2 + 2 + 4 + 2; // owner, type, class, ttl, length
+    let mut data = Vec::new();
+    let mut previous = 12;
+    let mut last = 0;
+    for i in 0..chain_hops {
+        last = data_start + 2 * i;
+        data.extend([0xc0 | (previous >> 8) as u8, previous as u8]);
+        previous = last;
+    }
+    assert!(
+        last < 0x4000,
+        "a pointer cannot name an offset past 14 bits"
+    );
+    let owner = [0xc0 | (last >> 8) as u8, last as u8];
+    reply = reply.record(&[0xc0, 12], 16, CLASS_IN, 60, &data);
+    reply = reply.canonical_name(OURS, "b.zone.test");
+    reply = reply.canonical_name("b.zone.test", "c.zone.test");
+    while reply.bytes.len() + 16 <= 65_535 {
+        reply = reply.record(
+            &owner,
+            record_type::IPV4_ADDRESS,
+            CLASS_IN,
+            60,
+            &[10, 0, 2, 9],
+        );
+    }
+    assert!(reply.bytes.len() > 65_000);
+    assert_eq!(
+        reply.judged(),
+        Err(Reject::Malformed(Error::TooManyPointers))
+    );
 }

@@ -95,6 +95,13 @@ pub const CLASS_IN: u16 = 1;
 /// a name through itself from costing more than eight scans of its own answer section.
 pub const MAXIMUM_CHAIN: usize = 8;
 
+/// How many compression pointers [`decode_name`] follows within one name before refusing it with
+/// [`Error::TooManyPointers`]. A name has at most 127 labels, and an encoder points at an earlier
+/// name that holds at least one label of its own, so a correctly encoded name never needs more than 127
+/// hops. The bound keeps the work to read one name proportional to the name rather than to the message,
+/// which matters because [`Query::accept`] reads every name in the answer section more than once.
+pub const MAXIMUM_POINTERS: usize = 127;
+
 /// How many IPv4 addresses an [`Answer`] keeps (see the crate's BUGS).
 pub const MAXIMUM_IPV4_ADDRESSES: usize = 8;
 
@@ -124,6 +131,10 @@ pub enum Error {
     /// produces satisfies that (a pointer names an earlier name), and enforcing it is also what makes
     /// the decoder terminate on a pointer loop.
     PointerForward,
+    /// A name that follows more than [`MAXIMUM_POINTERS`] compression pointers. Every correctly encoded
+    /// name follows at most that many; the bound stops a chain of pointers from costing a full walk
+    /// every time a name that ends in it is read. The name of this variant is provisional.
+    TooManyPointers,
     /// A record's data is the wrong shape for its type: an A record that is not four bytes, or a
     /// canonical name whose name runs past its own record.
     BadRecordData,
@@ -416,7 +427,8 @@ impl core::fmt::Display for Name {
 /// Compression pointers must point **strictly backwards**, each target earlier than the last. That
 /// is what a correct encoder always produces, and it is the termination argument: the pointer
 /// budget strictly decreases and every label consumes bytes, so a pointer loop is an
-/// [`Error::PointerForward`] rather than a hang. `src/proofs.rs` checks that claim with Kani.
+/// [`Error::PointerForward`] rather than a hang. A name that follows more than [`MAXIMUM_POINTERS`]
+/// pointers is an [`Error::TooManyPointers`]. `src/proofs.rs` checks the termination claim with Kani.
 pub fn decode_name(message: &[u8], off: usize) -> Result<(Name, usize)> {
     let mut out = Name {
         bytes: [0; MAXIMUM_NAME_BYTES],
@@ -443,6 +455,7 @@ pub(crate) fn decode_name_into(
     let mut resume: Option<usize> = None;
     // Every pointer must target an offset strictly below this.
     let mut fence = off;
+    let mut pointers = 0usize;
     loop {
         let b = *message.get(position).ok_or(Error::Truncated)?;
         match b & 0xc0 {
@@ -455,6 +468,10 @@ pub(crate) fn decode_name_into(
                 if target >= fence {
                     return Err(Error::PointerForward);
                 }
+                if pointers == MAXIMUM_POINTERS {
+                    return Err(Error::TooManyPointers);
+                }
+                pointers += 1;
                 fence = target;
                 position = target;
             }
