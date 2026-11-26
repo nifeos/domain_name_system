@@ -6,9 +6,10 @@ sentence beside it.
 ## Unreleased
 
 - `decode_name` follows at most `MAXIMUM_POINTERS` (127) compression pointers within one name and
-  refuses a longer chain with the new `Error::TooManyPointers`. Before, a maximum-size TCP reply
-  made of a long chain of pointers and thousands of records that point into it cost about a second
-  of CPU in `Query::accept`; now it is refused at its first such name.
+  refuses a longer chain with the new `Error::TooManyPointers`. Before, a reply of the largest size a
+  Transmission Control Protocol (TCP) frame can carry, made of a long chain of pointers and thousands
+  of records that point into it, cost `Query::accept` about a second of processor time; now the first
+  such name ends the read.
 
 ## 0.1.0-pre.1
 
