@@ -491,6 +491,30 @@ impl core::fmt::Display for Name {
 /// budget strictly decreases and every label consumes bytes, so a pointer loop is an
 /// [`Error::PointerForward`] rather than a hang. A name that follows more than [`MAXIMUM_POINTERS`]
 /// pointers is an [`Error::TooManyPointers`]. `src/proofs.rs` checks the termination claim with Kani.
+///
+/// # Examples
+///
+/// A name written out at offset 0, and a second one at offset 14 that is one label and then a
+/// pointer back to the first:
+///
+/// ```
+/// use domain_name_system::{Error, Name, decode_name};
+///
+/// # fn main() -> Result<(), Error> {
+/// let message = b"\x07example\x04test\x00\x03www\xc0\x00";
+/// let (name, resume) = decode_name(message, 0)?;
+/// assert_eq!(name, Name::from_dotted("example.test")?);
+/// assert_eq!(resume, 14);
+///
+/// let (name, resume) = decode_name(message, 14)?;
+/// assert_eq!(name, Name::from_dotted("www.example.test")?);
+/// assert_eq!(resume, message.len()); // past the pointer, not past the name it points to
+///
+/// // A pointer to itself is not strictly backwards.
+/// assert_eq!(decode_name(b"\xc0\x00", 0), Err(Error::PointerForward));
+/// # Ok(())
+/// # }
+/// ```
 pub fn decode_name(message: &[u8], off: usize) -> Result<(Name, usize)> {
     let mut out = Name {
         bytes: [0; MAXIMUM_NAME_BYTES],
@@ -813,6 +837,21 @@ impl Answer {
 impl Query {
     /// A query for `host`'s IPv4 addresses under transaction id `id`. Fails only when `host` is not
     /// a host name [`Name::from_dotted`] accepts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use domain_name_system::{Error, Name, Query};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let query = Query::new(0x4e1f, "packages.example.test")?;
+    /// assert_eq!(query.id(), 0x4e1f);
+    /// assert_eq!(query.name(), &Name::from_dotted("packages.example.test")?);
+    ///
+    /// assert_eq!(Query::new(1, "two words.test"), Err(Error::BadCharacter));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(id: u16, host: &str) -> Result<Query> {
         Ok(Query {
             id,
@@ -840,6 +879,26 @@ impl Query {
     /// Write the query message (header with RD set, one question, type A, class `IN`) into `out`, and
     /// return its length. At most [`HEADER_BYTES`] + [`MAXIMUM_NAME_BYTES`] + 4 = 271 bytes, so it
     /// always fits a UDP datagram.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use domain_name_system::{Error, MAXIMUM_UDP_MESSAGE_BYTES, Query};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let query = Query::new(0x4e1f, "example.test")?;
+    /// let mut datagram = [0u8; MAXIMUM_UDP_MESSAGE_BYTES];
+    /// let n = query.request(&mut datagram)?;
+    /// assert_eq!(
+    ///     &datagram[..n],
+    ///     b"\x4e\x1f\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x04test\x00\x00\x01\x00\x01",
+    /// );
+    ///
+    /// // A buffer too small is refused rather than written past.
+    /// assert_eq!(query.request(&mut datagram[..n - 1]), Err(Error::Overflow));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn request(&self, out: &mut [u8]) -> Result<usize> {
         let name = self.name.as_bytes();
         let len = HEADER_BYTES + name.len() + 4;
@@ -860,6 +919,26 @@ impl Query {
 
     /// The same query framed for TCP (`RFC 7766`): a two-byte big-endian length, then the message.
     /// Returns the framed length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use domain_name_system::{Error, Query};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let query = Query::new(0x4e1f, "example.test")?;
+    /// let mut framed = [0u8; 514];
+    /// let n = query.request_tcp(&mut framed)?;
+    ///
+    /// // The length, then the very bytes `request` writes.
+    /// let mut message = [0u8; 512];
+    /// let m = query.request(&mut message)?;
+    /// assert_eq!(n, m + 2);
+    /// assert_eq!(framed[..2], (m as u16).to_be_bytes());
+    /// assert_eq!(framed[2..n], message[..m]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn request_tcp(&self, out: &mut [u8]) -> Result<usize> {
         let body = out.get_mut(2..).ok_or(Error::Overflow)?;
         let n = self.request(body)?;
@@ -879,9 +958,10 @@ impl Query {
     ///
     /// use domain_name_system::{Query, Reject};
     ///
-    /// let query = Query::new(0x4e1f, "packages.example.test").unwrap();
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let query = Query::new(0x4e1f, "packages.example.test")?;
     /// let mut request = [0u8; 512];
-    /// let n = query.request(&mut request).unwrap();
+    /// let n = query.request(&mut request)?;
     /// assert_eq!(&request[..2], &[0x4e, 0x1f]); // our transaction id
     ///
     /// // The reply: our header with QR and RA set, our question back, then one A record.
@@ -894,13 +974,15 @@ impl Query {
     /// reply.extend_from_slice(&300u32.to_be_bytes()); // TTL
     /// reply.extend_from_slice(&[0, 4, 10, 0, 2, 9]); // RDLENGTH 4, then the address
     ///
-    /// let answer = query.accept(&reply).unwrap();
+    /// let answer = query.accept(&reply)?;
     /// assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
     /// assert_eq!(answer.ttl_seconds(), 300);
     ///
     /// // The same bytes under somebody else's transaction id are not an answer to us.
     /// reply[1] ^= 1;
     /// assert_eq!(query.accept(&reply), Err(Reject::IdMismatch));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn accept(&self, reply: &[u8]) -> core::result::Result<Answer, Reject> {
         let mut reader = Reader::new(reply).map_err(Reject::Malformed)?;
@@ -1080,6 +1162,30 @@ impl<'a> TcpReply<'a> {
     }
 
     /// Take the next piece. `Ok(true)` once the message is whole.
+    ///
+    /// # Examples
+    ///
+    /// A reply split across reads wherever the network split it, even inside its length, and the
+    /// refusals of a reply too long for its buffer and of bytes past the end:
+    ///
+    /// ```
+    /// use domain_name_system::{Error, TcpReply};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let mut buffer = [0u8; 8];
+    /// let mut reply = TcpReply::new(&mut buffer);
+    /// assert!(!reply.feed(&[0])?); // half the length
+    /// assert!(!reply.feed(&[4, 0xaa])?);
+    /// assert!(reply.feed(&[0xbb, 0xcc, 0xdd])?);
+    /// assert_eq!(reply.message(), Some(&[0xaa, 0xbb, 0xcc, 0xdd][..]));
+    /// assert_eq!(reply.feed(&[0xee]), Err(Error::Trailing));
+    ///
+    /// let mut small = [0u8; 8];
+    /// let mut too_long = TcpReply::new(&mut small);
+    /// assert_eq!(too_long.feed(&[0, 7]), Err(Error::Overflow)); // 2 + 7 bytes will not fit in 8
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn feed(&mut self, mut bytes: &[u8]) -> Result<bool> {
         while !bytes.is_empty() {
             let limit = match self.wanted() {
