@@ -7,6 +7,8 @@
 //! time to live values that differ along a chain. The rest are built by hand below, one per check, because nobody
 //! captures a forgery.
 
+use core::net::Ipv4Addr;
+
 use domain_name_system::{
     CLASS_IN, Error, FLAG_TRUNCATED, Header, MAXIMUM_CHAIN, MAXIMUM_IPV4_ADDRESSES,
     MAXIMUM_POINTERS, Name, Query, Reader, Reject, TcpReply, canonical_name_target, decode_name,
@@ -27,7 +29,10 @@ fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
     let answer = query.accept(REAL_EXAMPLE).unwrap();
     assert_eq!(
         answer.ipv4_addresses(),
-        &[[104, 20, 23, 154], [172, 66, 147, 243]]
+        &[
+            Ipv4Addr::new(104, 20, 23, 154),
+            Ipv4Addr::new(172, 66, 147, 243)
+        ]
     );
     assert_eq!(answer.ttl_seconds(), 0x31);
     assert_eq!(
@@ -40,7 +45,7 @@ fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
 fn a_real_canonical_name_is_followed_and_the_shortest_time_to_live_wins() {
     let query = Query::new(0x2222, "www.github.com").unwrap();
     let answer = query.accept(REAL_GITHUB).unwrap();
-    assert_eq!(answer.ipv4_addresses(), &[[140, 82, 116, 3]]);
+    assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(140, 82, 116, 3)]);
     assert_eq!(
         answer.canonical(),
         &Name::from_dotted("github.com").unwrap()
@@ -157,7 +162,7 @@ impl Reply {
         Query::new(OUR_ID, OURS)
             .unwrap()
             .accept(&self.bytes)
-            .map(|a| a.ipv4_addresses().to_vec())
+            .map(|a| a.ipv4_addresses().iter().map(Ipv4Addr::octets).collect())
     }
 }
 
@@ -269,7 +274,7 @@ fn a_chain_is_followed_in_any_order_and_only_from_our_name() {
         .a("bank.test", [6, 6, 6, 6])
         .canonical_name(OURS, "cdn.zone.test");
     let answer = Query::new(OUR_ID, OURS).unwrap().accept(&r.bytes).unwrap();
-    assert_eq!(answer.ipv4_addresses(), &[[10, 0, 2, 9]]);
+    assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
     assert_eq!(
         answer.canonical(),
         &Name::from_dotted("origin.zone.test").unwrap()
@@ -872,4 +877,86 @@ fn a_maximum_size_reply_built_on_a_long_pointer_chain_is_refused_at_the_chain() 
         reply.judged(),
         Err(Reject::Malformed(Error::TooManyPointers))
     );
+}
+
+#[test]
+fn a_refusal_prints_and_chains_to_the_error_inside_it() {
+    use std::error::Error as _;
+
+    let malformed = Reject::Malformed(Error::PointerForward);
+    assert_eq!(
+        malformed.to_string(),
+        "the reply is not a well-formed DNS message"
+    );
+    let source = malformed
+        .source()
+        .expect("a malformed reply names its error");
+    assert_eq!(
+        source.to_string(),
+        "a compression pointer does not point strictly backwards"
+    );
+    assert_eq!(source.downcast_ref::<Error>(), Some(&Error::PointerForward));
+    assert!(Reject::IdMismatch.source().is_none());
+    assert_eq!(
+        Reject::ServerError(2).to_string(),
+        "the server answered with response code 2"
+    );
+
+    // `?` carries either into a boxed error.
+    fn boxed() -> Result<(), Box<dyn std::error::Error>> {
+        Name::from_dotted("a..b")?;
+        Ok(())
+    }
+    assert_eq!(
+        boxed().unwrap_err().to_string(),
+        "a label uses a reserved tag or is empty"
+    );
+}
+
+#[test]
+fn a_parsed_question_equals_the_one_sent_and_the_state_types_print_positions() {
+    let query = Query::new(7, "example.test").unwrap();
+    let mut out = [0u8; 512];
+    let n = query.request(&mut out).unwrap();
+    let mut reader = Reader::new(&out[..n]).unwrap();
+    let question = reader.question().unwrap();
+    assert_eq!(
+        question,
+        domain_name_system::Question {
+            name: *query.name(),
+            record_type: record_type::IPV4_ADDRESS,
+            class: CLASS_IN,
+        }
+    );
+    assert_eq!(query, Query::for_name(7, *query.name()));
+    assert!(format!("{reader:?}").contains(&format!("position: {n}, message_length: {n}")));
+
+    let mut buffer = [0u8; 16];
+    let mut tcp = TcpReply::new(&mut buffer);
+    tcp.feed(&[0, 3, 1]).unwrap();
+    assert_eq!(
+        format!("{tcp:?}"),
+        "TcpReply { received: 3, expected: Some(5), capacity: 16 }"
+    );
+}
+
+#[test]
+fn names_equal_without_regard_to_case_are_one_key() {
+    use std::collections::HashSet;
+
+    let mut cache = HashSet::new();
+    assert!(cache.insert(Name::from_dotted("Packages.Example.Test").unwrap()));
+    assert!(!cache.insert(Name::from_dotted("packages.example.test").unwrap()));
+    assert!(cache.contains(&Name::from_dotted("PACKAGES.EXAMPLE.TEST.").unwrap()));
+    assert!(!cache.contains(&Name::from_dotted("packages.example").unwrap()));
+    assert_eq!(cache.len(), 1);
+
+    // The hash itself: the same for names that differ only in case, and different for names
+    // that differ, so a map spreads its keys rather than chaining every name in one bucket.
+    let hash = |text: &str| {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+        BuildHasherDefault::<DefaultHasher>::default().hash_one(Name::from_dotted(text).unwrap())
+    };
+    assert_eq!(hash("Example.TEST"), hash("example.test"));
+    assert_ne!(hash("example.test"), hash("example.text"));
 }

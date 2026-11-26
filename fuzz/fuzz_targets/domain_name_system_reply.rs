@@ -94,7 +94,7 @@ fuzz_target!(|reply: &[u8]| {
             assert!(
                 a_records
                     .iter()
-                    .any(|(owner, _, data)| *owner == canonical && data[..] == address[..]),
+                    .any(|(owner, _, data)| *owner == canonical && data[..] == address.octets()[..]),
                 "an address that no A record for the canonical name carries"
             );
         }

@@ -9,6 +9,31 @@
 //! [`Query::accept`] believes as little as it can: [`Reject`] lists its nine refusals, in check
 //! order. Only A records owned by the end of the canonical name chain from our name are taken, so a reply
 //! about `example.com` cannot plant an address for `bank.test`; authority and additional go unread.
+//!
+//! # Examples
+//!
+//! A query, the reply a recursive server would send to it, and the address it gives:
+//!
+//! ```
+//! use core::net::Ipv4Addr;
+//!
+//! use domain_name_system::Query;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let query = Query::new(0x4e1f, "packages.example.test")?;
+//! let mut reply = [0u8; 512];
+//! let n = query.request(&mut reply)?;
+//! let mut reply = reply[..n].to_vec();
+//! reply[2] |= 0x80; // QR: a response
+//! reply[7] = 1; // ANCOUNT = 1
+//! // One A record, its owner a pointer to the question's name, TTL 300, then the address.
+//! reply.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 0x2c, 0, 4, 10, 0, 2, 9]);
+//!
+//! let answer = query.accept(&reply)?;
+//! assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
+//! # Ok(())
+//! # }
+//! ```
 
 //! # BUGS
 //!
@@ -29,8 +54,15 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+use core::net::Ipv4Addr;
+
 #[cfg(kani)]
 mod proofs;
+
+/// The README's examples, run by `cargo test` so that the text a reader meets first still compiles.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 /// The port a name server listens on, over UDP and TCP alike (`RFC 1035` section 4.2).
 pub const PORT: u16 = 53;
@@ -144,6 +176,27 @@ pub enum Error {
     Trailing,
 }
 
+/// One lowercase phrase per variant, with no trailing period, as the standard library's errors
+/// print, so a caller can embed it in a sentence of its own.
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Error::Truncated => "the message ends before the structure it promised",
+            Error::BadLabel => "a label uses a reserved tag or is empty",
+            Error::LabelTooLong => "a label is longer than 63 bytes",
+            Error::NameTooLong => "a name is longer than 255 bytes in wire form",
+            Error::BadCharacter => "a name holds a byte outside letters, digits, `-` and `_`",
+            Error::PointerForward => "a compression pointer does not point strictly backwards",
+            Error::TooManyPointers => "a name follows too many compression pointers",
+            Error::BadRecordData => "a record's data is the wrong shape for its type",
+            Error::Overflow => "the buffer is too small for the message",
+            Error::Trailing => "bytes follow the message the TCP length announced",
+        })
+    }
+}
+
+impl core::error::Error for Error {}
+
 /// This crate's results.
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -225,8 +278,7 @@ impl Header {
 /// same name. `Debug` and `Display` print the dotted form, and [`FromStr`](core::str::FromStr)
 /// reads it ([`Name::from_dotted`]).
 ///
-/// There is no `Hash`: with case-insensitive equality a hash would have to fold case first, and a
-/// caller that wants a key folds the bytes itself.
+/// `Hash` folds case the same way, so equal names hash equally and a `Name` can key a cache.
 #[derive(Clone, Copy)]
 pub struct Name {
     bytes: [u8; MAXIMUM_NAME_BYTES],
@@ -374,6 +426,16 @@ impl PartialEq for Name {
 
 impl Eq for Name {}
 
+/// Each wire byte lowercased as it goes to the hasher, so names that are equal hash equally. The
+/// root label ends every name, so no name's bytes are a prefix of another's.
+impl core::hash::Hash for Name {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        for b in self.as_bytes() {
+            state.write_u8(b.to_ascii_lowercase());
+        }
+    }
+}
+
 impl core::fmt::Debug for Name {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::fmt::Display::fmt(self, f)
@@ -429,6 +491,30 @@ impl core::fmt::Display for Name {
 /// budget strictly decreases and every label consumes bytes, so a pointer loop is an
 /// [`Error::PointerForward`] rather than a hang. A name that follows more than [`MAXIMUM_POINTERS`]
 /// pointers is an [`Error::TooManyPointers`]. `src/proofs.rs` checks the termination claim with Kani.
+///
+/// # Examples
+///
+/// A name written out at offset 0, and a second one at offset 14 that is one label and then a
+/// pointer back to the first:
+///
+/// ```
+/// use domain_name_system::{Error, Name, decode_name};
+///
+/// # fn main() -> Result<(), Error> {
+/// let message = b"\x07example\x04test\x00\x03www\xc0\x00";
+/// let (name, resume) = decode_name(message, 0)?;
+/// assert_eq!(name, Name::from_dotted("example.test")?);
+/// assert_eq!(resume, 14);
+///
+/// let (name, resume) = decode_name(message, 14)?;
+/// assert_eq!(name, Name::from_dotted("www.example.test")?);
+/// assert_eq!(resume, message.len()); // past the pointer, not past the name it points to
+///
+/// // A pointer to itself is not strictly backwards.
+/// assert_eq!(decode_name(b"\xc0\x00", 0), Err(Error::PointerForward));
+/// # Ok(())
+/// # }
+/// ```
 pub fn decode_name(message: &[u8], off: usize) -> Result<(Name, usize)> {
     let mut out = Name {
         bytes: [0; MAXIMUM_NAME_BYTES],
@@ -506,8 +592,8 @@ pub(crate) fn decode_name_into(
 // Reading a message.
 // =================================================================================================
 
-/// A decoded question.
-#[derive(Debug, Clone, Copy)]
+/// A decoded question. Equal when every field is, the name compared as [`Name`] compares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Question {
     /// The name asked about.
     pub name: Name,
@@ -522,7 +608,9 @@ pub struct Question {
 /// A decoded resource record: its fixed fields and its raw data. Data that holds a name (a canonical name's)
 /// may be compressed against the whole message (a canonical name's is; an A record's is four plain bytes),
 /// so [`canonical_name_target`] takes the message too, and `data_offset` says where the data sits in it.
-#[derive(Debug, Clone, Copy)]
+/// Equal when every field is, `data_offset` included, so two records equal in content but read
+/// from different places are not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Record<'a> {
     /// The record's owner.
     pub name: Name,
@@ -546,12 +634,24 @@ pub struct Record<'a> {
 /// Walks one message in wire order: the header, then [`Reader::question`] `question_count` times, then
 /// [`Reader::record`] for each record. The reader does not count for you. It is `Clone`, so a caller
 /// can rescan a section from a saved position.
+///
+/// `Debug` prints the header, the read position and the message's length, not the message.
 #[derive(Clone)]
 pub struct Reader<'a> {
     /// The message's header, decoded on construction.
     pub header: Header,
     message: &'a [u8],
     off: usize,
+}
+
+impl core::fmt::Debug for Reader<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Reader")
+            .field("header", &self.header)
+            .field("position", &self.off)
+            .field("message_length", &self.message.len())
+            .finish()
+    }
 }
 
 impl<'a> Reader<'a> {
@@ -628,7 +728,7 @@ pub fn canonical_name_target(message: &[u8], record: &Record<'_>) -> Result<Name
 /// The id is the caller's to choose, and over UDP it should be unguessable: it is the only thing an
 /// off-path forger has to guess. This crate has no randomness of its own, deliberately, for the
 /// reason `network_time_protocol::Query::with_nonce` takes its nonce as an argument.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Query {
     id: u16,
     name: Name,
@@ -661,6 +761,36 @@ pub enum Reject {
     NoIpv4Address,
 }
 
+/// The check that refused the reply, as one lowercase phrase. [`Reject::Malformed`] names no detail
+/// itself: its [`Error`] is the [`source`](core::error::Error::source), so a caller that prints
+/// the chain sees both without either repeating the other.
+impl core::fmt::Display for Reject {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Reject::Malformed(_) => f.write_str("the reply is not a well-formed DNS message"),
+            Reject::NotAResponse => {
+                f.write_str("the message is not a response to a standard query")
+            }
+            Reject::IdMismatch => f.write_str("the reply carries another transaction id"),
+            Reject::Truncated => f.write_str("the server truncated the reply"),
+            Reject::QuestionMismatch => f.write_str("the reply does not echo the question asked"),
+            Reject::NoSuchName => f.write_str("the name does not exist"),
+            Reject::ServerError(code) => write!(f, "the server answered with response code {code}"),
+            Reject::ChainTooLong => f.write_str("the canonical name chain is too long or loops"),
+            Reject::NoIpv4Address => f.write_str("the reply holds no IPv4 address for the name"),
+        }
+    }
+}
+
+impl core::error::Error for Reject {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Reject::Malformed(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
 /// A time to live (`TTL`) as a receiver believes it: `RFC 2181` section 8 says one with its most significant bit set
 /// is treated as zero.
 fn believable_time_to_live(time_to_live: u32) -> u32 {
@@ -674,7 +804,7 @@ fn believable_time_to_live(time_to_live: u32) -> u32 {
 /// The addresses a reply gave for our name, after every check passed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Answer {
-    ipv4_addresses: [[u8; 4]; MAXIMUM_IPV4_ADDRESSES],
+    ipv4_addresses: [Ipv4Addr; MAXIMUM_IPV4_ADDRESSES],
     count: u8,
     ttl_seconds: u32,
     canonical: Name,
@@ -682,7 +812,10 @@ pub struct Answer {
 
 impl Answer {
     /// The IPv4 addresses, in the order the server gave them. Never empty.
-    pub fn ipv4_addresses(&self) -> &[[u8; 4]] {
+    ///
+    /// They are the standard library's [`Ipv4Addr`], the type a socket takes, so a caller connects
+    /// to one as it stands; [`Ipv4Addr::octets`] gives the four bytes back.
+    pub fn ipv4_addresses(&self) -> &[Ipv4Addr] {
         &self.ipv4_addresses[..self.count as usize]
     }
 
@@ -704,6 +837,21 @@ impl Answer {
 impl Query {
     /// A query for `host`'s IPv4 addresses under transaction id `id`. Fails only when `host` is not
     /// a host name [`Name::from_dotted`] accepts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use domain_name_system::{Error, Name, Query};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let query = Query::new(0x4e1f, "packages.example.test")?;
+    /// assert_eq!(query.id(), 0x4e1f);
+    /// assert_eq!(query.name(), &Name::from_dotted("packages.example.test")?);
+    ///
+    /// assert_eq!(Query::new(1, "two words.test"), Err(Error::BadCharacter));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new(id: u16, host: &str) -> Result<Query> {
         Ok(Query {
             id,
@@ -731,6 +879,26 @@ impl Query {
     /// Write the query message (header with RD set, one question, type A, class `IN`) into `out`, and
     /// return its length. At most [`HEADER_BYTES`] + [`MAXIMUM_NAME_BYTES`] + 4 = 271 bytes, so it
     /// always fits a UDP datagram.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use domain_name_system::{Error, MAXIMUM_UDP_MESSAGE_BYTES, Query};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let query = Query::new(0x4e1f, "example.test")?;
+    /// let mut datagram = [0u8; MAXIMUM_UDP_MESSAGE_BYTES];
+    /// let n = query.request(&mut datagram)?;
+    /// assert_eq!(
+    ///     &datagram[..n],
+    ///     b"\x4e\x1f\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x04test\x00\x00\x01\x00\x01",
+    /// );
+    ///
+    /// // A buffer too small is refused rather than written past.
+    /// assert_eq!(query.request(&mut datagram[..n - 1]), Err(Error::Overflow));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn request(&self, out: &mut [u8]) -> Result<usize> {
         let name = self.name.as_bytes();
         let len = HEADER_BYTES + name.len() + 4;
@@ -751,6 +919,26 @@ impl Query {
 
     /// The same query framed for TCP (`RFC 7766`): a two-byte big-endian length, then the message.
     /// Returns the framed length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use domain_name_system::{Error, Query};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let query = Query::new(0x4e1f, "example.test")?;
+    /// let mut framed = [0u8; 514];
+    /// let n = query.request_tcp(&mut framed)?;
+    ///
+    /// // The length, then the very bytes `request` writes.
+    /// let mut message = [0u8; 512];
+    /// let m = query.request(&mut message)?;
+    /// assert_eq!(n, m + 2);
+    /// assert_eq!(framed[..2], (m as u16).to_be_bytes());
+    /// assert_eq!(framed[2..n], message[..m]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn request_tcp(&self, out: &mut [u8]) -> Result<usize> {
         let body = out.get_mut(2..).ok_or(Error::Overflow)?;
         let n = self.request(body)?;
@@ -766,11 +954,14 @@ impl Query {
     /// A reply as a recursive server sends it, the owner a compression pointer to the question:
     ///
     /// ```
+    /// use core::net::Ipv4Addr;
+    ///
     /// use domain_name_system::{Query, Reject};
     ///
-    /// let query = Query::new(0x4e1f, "packages.example.test").unwrap();
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let query = Query::new(0x4e1f, "packages.example.test")?;
     /// let mut request = [0u8; 512];
-    /// let n = query.request(&mut request).unwrap();
+    /// let n = query.request(&mut request)?;
     /// assert_eq!(&request[..2], &[0x4e, 0x1f]); // our transaction id
     ///
     /// // The reply: our header with QR and RA set, our question back, then one A record.
@@ -783,13 +974,15 @@ impl Query {
     /// reply.extend_from_slice(&300u32.to_be_bytes()); // TTL
     /// reply.extend_from_slice(&[0, 4, 10, 0, 2, 9]); // RDLENGTH 4, then the address
     ///
-    /// let answer = query.accept(&reply).unwrap();
-    /// assert_eq!(answer.ipv4_addresses(), &[[10, 0, 2, 9]]);
+    /// let answer = query.accept(&reply)?;
+    /// assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
     /// assert_eq!(answer.ttl_seconds(), 300);
     ///
     /// // The same bytes under somebody else's transaction id are not an answer to us.
     /// reply[1] ^= 1;
     /// assert_eq!(query.accept(&reply), Err(Reject::IdMismatch));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn accept(&self, reply: &[u8]) -> core::result::Result<Answer, Reject> {
         let mut reader = Reader::new(reply).map_err(Reject::Malformed)?;
@@ -868,7 +1061,7 @@ impl Query {
         }
 
         let mut answer = Answer {
-            ipv4_addresses: [[0; 4]; MAXIMUM_IPV4_ADDRESSES],
+            ipv4_addresses: [Ipv4Addr::UNSPECIFIED; MAXIMUM_IPV4_ADDRESSES],
             count: 0,
             ttl_seconds,
             canonical: owner,
@@ -889,7 +1082,7 @@ impl Query {
                 answer.ipv4_addresses.get_mut(answer.count as usize),
                 <[u8; 4]>::try_from(record.data),
             ) {
-                *slot = ipv4_address;
+                *slot = Ipv4Addr::from(ipv4_address);
                 answer.count += 1;
             }
         }
@@ -932,9 +1125,22 @@ fn response_code_reject(code: u8) -> Reject {
 /// assert_eq!(reply.feed(&[2, 3]), Ok(true));
 /// assert_eq!(reply.message(), Some(&[1u8, 2, 3][..]));
 /// ```
+///
+/// `Debug` prints how many bytes have arrived, how many the frame holds once its length has arrived,
+/// both counting the two-byte length, and the buffer's capacity; it prints none of the bytes.
 pub struct TcpReply<'a> {
     buffer: &'a mut [u8],
     have: usize,
+}
+
+impl core::fmt::Debug for TcpReply<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TcpReply")
+            .field("received", &self.have)
+            .field("expected", &self.wanted())
+            .field("capacity", &self.buffer.len())
+            .finish()
+    }
 }
 
 impl<'a> TcpReply<'a> {
@@ -956,6 +1162,30 @@ impl<'a> TcpReply<'a> {
     }
 
     /// Take the next piece. `Ok(true)` once the message is whole.
+    ///
+    /// # Examples
+    ///
+    /// A reply split across reads wherever the network split it, even inside its length, and the
+    /// refusals of a reply too long for its buffer and of bytes past the end:
+    ///
+    /// ```
+    /// use domain_name_system::{Error, TcpReply};
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// let mut buffer = [0u8; 8];
+    /// let mut reply = TcpReply::new(&mut buffer);
+    /// assert!(!reply.feed(&[0])?); // half the length
+    /// assert!(!reply.feed(&[4, 0xaa])?);
+    /// assert!(reply.feed(&[0xbb, 0xcc, 0xdd])?);
+    /// assert_eq!(reply.message(), Some(&[0xaa, 0xbb, 0xcc, 0xdd][..]));
+    /// assert_eq!(reply.feed(&[0xee]), Err(Error::Trailing));
+    ///
+    /// let mut small = [0u8; 8];
+    /// let mut too_long = TcpReply::new(&mut small);
+    /// assert_eq!(too_long.feed(&[0, 7]), Err(Error::Overflow)); // 2 + 7 bytes will not fit in 8
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn feed(&mut self, mut bytes: &[u8]) -> Result<bool> {
         while !bytes.is_empty() {
             let limit = match self.wanted() {
