@@ -9,6 +9,20 @@ repository = "https://github.com/partsfoundry/domain_name_system"
 readme = "README.md"
 keywords = ["dns", "stub-resolver", "no-std", "rfc1035", "rfc7766"]
 categories = ["no-std", "no-std::no-alloc", "network-programming", "parser-implementations"]
+# What the package carries: the crate, its tests and their fixtures, the proofs' falsification
+# patches, the README, the changelog and the licenses, so that every path the README names is in
+# it. The fuzz target, the repository's workflows, hooks, process documents and lint settings stay
+# out.
+include = [
+    "/src/**",
+    "/tests/**",
+    "/falsifications/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+]
 publish = false     # `false` until the release that publishes; that release deletes the line
 
 # The DNS wire format for a stub resolver (RFC 1035, RFC 7766 for TCP): a query for one host name's
