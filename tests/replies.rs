@@ -7,6 +7,8 @@
 //! time to live values that differ along a chain. The rest are built by hand below, one per check, because nobody
 //! captures a forgery.
 
+use core::net::Ipv4Addr;
+
 use domain_name_system::{
     CLASS_IN, Error, FLAG_TRUNCATED, Header, MAXIMUM_CHAIN, MAXIMUM_IPV4_ADDRESSES,
     MAXIMUM_POINTERS, Name, Query, Reader, Reject, TcpReply, canonical_name_target, decode_name,
@@ -27,7 +29,7 @@ fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
     let answer = query.accept(REAL_EXAMPLE).unwrap();
     assert_eq!(
         answer.ipv4_addresses(),
-        &[[104, 20, 23, 154], [172, 66, 147, 243]]
+        &[Ipv4Addr::new(104, 20, 23, 154), Ipv4Addr::new(172, 66, 147, 243)]
     );
     assert_eq!(answer.ttl_seconds(), 0x31);
     assert_eq!(
@@ -40,7 +42,7 @@ fn a_real_reply_with_two_ipv4_addresses_gives_both_in_order() {
 fn a_real_canonical_name_is_followed_and_the_shortest_time_to_live_wins() {
     let query = Query::new(0x2222, "www.github.com").unwrap();
     let answer = query.accept(REAL_GITHUB).unwrap();
-    assert_eq!(answer.ipv4_addresses(), &[[140, 82, 116, 3]]);
+    assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(140, 82, 116, 3)]);
     assert_eq!(
         answer.canonical(),
         &Name::from_dotted("github.com").unwrap()
@@ -157,7 +159,7 @@ impl Reply {
         Query::new(OUR_ID, OURS)
             .unwrap()
             .accept(&self.bytes)
-            .map(|a| a.ipv4_addresses().to_vec())
+            .map(|a| a.ipv4_addresses().iter().map(Ipv4Addr::octets).collect())
     }
 }
 
@@ -269,7 +271,7 @@ fn a_chain_is_followed_in_any_order_and_only_from_our_name() {
         .a("bank.test", [6, 6, 6, 6])
         .canonical_name(OURS, "cdn.zone.test");
     let answer = Query::new(OUR_ID, OURS).unwrap().accept(&r.bytes).unwrap();
-    assert_eq!(answer.ipv4_addresses(), &[[10, 0, 2, 9]]);
+    assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
     assert_eq!(
         answer.canonical(),
         &Name::from_dotted("origin.zone.test").unwrap()

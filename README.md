@@ -20,6 +20,8 @@ lists its nine refusals in the order the checks run.
 ## EXAMPLES
 
 ```rust
+use core::net::Ipv4Addr;
+
 use domain_name_system::{Query, Reject};
 
 let query = Query::new(0x4e1f, "packages.example.test").unwrap();
@@ -38,7 +40,7 @@ reply.extend_from_slice(&300u32.to_be_bytes()); // TTL
 reply.extend_from_slice(&[0, 4, 10, 0, 2, 9]); // RDLENGTH 4, then the address
 
 let answer = query.accept(&reply).unwrap();
-assert_eq!(answer.ipv4_addresses(), &[[10, 0, 2, 9]]);
+assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
 assert_eq!(answer.ttl(), 300);
 
 // The same bytes under somebody else's transaction id are not an answer to us.

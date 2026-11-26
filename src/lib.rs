@@ -29,6 +29,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+use core::net::Ipv4Addr;
+
 #[cfg(kani)]
 mod proofs;
 
@@ -674,7 +676,7 @@ fn believable_time_to_live(time_to_live: u32) -> u32 {
 /// The addresses a reply gave for our name, after every check passed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Answer {
-    ipv4_addresses: [[u8; 4]; MAXIMUM_IPV4_ADDRESSES],
+    ipv4_addresses: [Ipv4Addr; MAXIMUM_IPV4_ADDRESSES],
     count: u8,
     ttl_seconds: u32,
     canonical: Name,
@@ -682,7 +684,10 @@ pub struct Answer {
 
 impl Answer {
     /// The IPv4 addresses, in the order the server gave them. Never empty.
-    pub fn ipv4_addresses(&self) -> &[[u8; 4]] {
+    ///
+    /// They are the standard library's [`Ipv4Addr`], the type a socket takes, so a caller connects
+    /// to one as it stands; [`Ipv4Addr::octets`] gives the four bytes back.
+    pub fn ipv4_addresses(&self) -> &[Ipv4Addr] {
         &self.ipv4_addresses[..self.count as usize]
     }
 
@@ -766,6 +771,8 @@ impl Query {
     /// A reply as a recursive server sends it, the owner a compression pointer to the question:
     ///
     /// ```
+    /// use core::net::Ipv4Addr;
+    ///
     /// use domain_name_system::{Query, Reject};
     ///
     /// let query = Query::new(0x4e1f, "packages.example.test").unwrap();
@@ -784,7 +791,7 @@ impl Query {
     /// reply.extend_from_slice(&[0, 4, 10, 0, 2, 9]); // RDLENGTH 4, then the address
     ///
     /// let answer = query.accept(&reply).unwrap();
-    /// assert_eq!(answer.ipv4_addresses(), &[[10, 0, 2, 9]]);
+    /// assert_eq!(answer.ipv4_addresses(), &[Ipv4Addr::new(10, 0, 2, 9)]);
     /// assert_eq!(answer.ttl_seconds(), 300);
     ///
     /// // The same bytes under somebody else's transaction id are not an answer to us.
@@ -868,7 +875,7 @@ impl Query {
         }
 
         let mut answer = Answer {
-            ipv4_addresses: [[0; 4]; MAXIMUM_IPV4_ADDRESSES],
+            ipv4_addresses: [Ipv4Addr::UNSPECIFIED; MAXIMUM_IPV4_ADDRESSES],
             count: 0,
             ttl_seconds,
             canonical: owner,
@@ -889,7 +896,7 @@ impl Query {
                 answer.ipv4_addresses.get_mut(answer.count as usize),
                 <[u8; 4]>::try_from(record.data),
             ) {
-                *slot = ipv4_address;
+                *slot = Ipv4Addr::from(ipv4_address);
                 answer.count += 1;
             }
         }
