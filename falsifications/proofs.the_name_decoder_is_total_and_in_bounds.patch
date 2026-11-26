@@ -7,15 +7,16 @@ server (or anyone forging one) can send.
 Expected to fail: the unwinding assertion, on a message whose pointer targets its own offset.
 
 diff --git a/src/lib.rs b/src/lib.rs
+index 10aee01..95360a8 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -448,9 +448,6 @@
+@@ -465,9 +465,6 @@ pub(crate) fn decode_name_into(
                  if resume.is_none() {
                      resume = Some(position + 2);
                  }
 -                if target >= fence {
 -                    return Err(Error::PointerForward);
 -                }
-                 fence = target;
-                 position = target;
-             }
+                 if pointers == MAXIMUM_POINTERS {
+                     return Err(Error::TooManyPointers);
+                 }
