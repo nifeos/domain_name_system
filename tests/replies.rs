@@ -950,4 +950,13 @@ fn names_equal_without_regard_to_case_are_one_key() {
     assert!(cache.contains(&Name::from_dotted("PACKAGES.EXAMPLE.TEST.").unwrap()));
     assert!(!cache.contains(&Name::from_dotted("packages.example").unwrap()));
     assert_eq!(cache.len(), 1);
+
+    // The hash itself: the same for names that differ only in case, and different for names
+    // that differ, so a map spreads its keys rather than chaining every name in one bucket.
+    let hash = |text: &str| {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+        BuildHasherDefault::<DefaultHasher>::default().hash_one(Name::from_dotted(text).unwrap())
+    };
+    assert_eq!(hash("Example.TEST"), hash("example.test"));
+    assert_ne!(hash("example.test"), hash("example.text"));
 }
